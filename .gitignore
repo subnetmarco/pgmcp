@@ -1,0 +1,121 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Built binaries
+pgmcp-server
+pgmcp-client
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Directories potentially created on remote AFP share
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.tmp
+*.temp
+Desktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Coverage reports
+coverage.out
+coverage.html
+
+# Air live reload tool
+tmp/
+.air.toml
+
+# Docker
+Dockerfile.local
+docker-compose.override.yml
+
+# Local development scripts
+scripts/local/
+
+# Configuration files with secrets
+config.local.*
+*.secret
+
+# Testcontainers
+.testcontainers/
+
+# Go module proxy cache
+$GOPROXY/
