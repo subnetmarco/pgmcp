@@ -1,3 +1,5 @@
+[![ci](https://github.com/subnetmarco/pgmcp/actions/workflows/ci.yml/badge.svg)](https://github.com/subnetmarco/pgmcp/actions/workflows/ci.yml)
+
 # PGMCP - PostgreSQL Model Context Protocol Server
 
 PGMCP is a Model Context Protocol (MCP) server that provides AI assistants with safe, read-only access to PostgreSQL databases through natural language queries. It acts as a bridge between AI models and your database, allowing you to ask questions in plain English and receive structured SQL results.
