@@ -589,6 +589,37 @@ func (s *Server) generateSQL(ctx context.Context, question, schema string, maxRo
 	  • for "specific item" with no ID/sku/title: pick the most recently purchased item.
 	  • for "last user": compute it from latest order timestamps.
 	- If multiple interpretations are plausible, choose the simplest and document via column aliases.
+
+	CRITICAL - Analyze the question grammar to determine if user wants ONE result or MULTIPLE results:
+
+	SINGULAR (return exactly 1 result with LIMIT 1):
+	- "Who is THE user..." (e.g., "Who is the user with the most reviews?")
+	- "What is THE product..." (e.g., "What is the most expensive product?")
+	- "Which customer has THE most..." (implies single customer)
+	- "Show me THE top seller..." (singular "seller")
+	- "Find THE best..." (singular with "the")
+	- "Who has THE highest..." (implies one person)
+	- "What product has THE lowest..." (singular "product")
+	- Any question with "THE" + singular noun + superlative → LIMIT 1
+
+	PLURAL (return multiple results with LIMIT 10-20):
+	- "Who are THE users..." (e.g., "Who are the users with the most reviews?")
+	- "What are THE products..." (plural "products")
+	- "Which customers have..." (plural "customers")
+	- "Show me THE top sellers..." (plural "sellers")
+	- "Find THE best products..." (plural "products")
+	- "Who are THE highest..." (plural context)
+	- "What products have..." (plural "products")
+
+	SPECIAL CASES:
+	- "How many..." → COUNT query, no additional LIMIT needed
+	- "What percentage..." → Calculation, LIMIT 1
+	- "List..." or "Show all..." → LIMIT 50 (reasonable subset)
+	- "Compare X and Y..." → Return just the compared items
+	- Questions about trends/patterns → Group by time periods, LIMIT 20
+
+	DEFAULT: When in doubt, if the question uses singular nouns and "the", use LIMIT 1. 
+	If plural nouns or asking for multiple items, use LIMIT 10-20.
 	
 	Schema summary:
 	` + schema
