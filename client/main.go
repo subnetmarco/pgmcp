@@ -31,6 +31,7 @@ func main() {
 	auth := flag.String("bearer", bearer, "Optional bearer token")
 	format := flag.String("format", "json", "Output format: table, json, csv")
 	verbose := flag.Bool("verbose", false, "Verbose output")
+	maxRows := flag.Int("max-rows", 1000, "Maximum rows to return (server auto-streams)")
 	var asks asksFlag
 	flag.Var(&asks, "ask", "Plain-English question to run (repeatable)")
 	search := flag.String("search", "", "Optional free-text search string")
@@ -70,7 +71,7 @@ func main() {
 		if *verbose {
 			fmt.Printf("🔍 Asking: %s\n", q)
 		}
-		runAsk(ctx, session, q, *format, *verbose)
+		runAsk(ctx, session, q, *format, *verbose, *maxRows)
 	}
 	if s := strings.TrimSpace(*search); s != "" {
 		if *verbose {
@@ -80,14 +81,44 @@ func main() {
 	}
 }
 
-func runAsk(ctx context.Context, session *mcp.ClientSession, question, format string, verbose bool) {
-	args := map[string]any{"query": question, "max_rows": 50}
-	call(ctx, session, "ask", args, format, verbose)
+func runAsk(ctx context.Context, session *mcp.ClientSession, question, format string, verbose bool, maxRows int) {
+	args := map[string]any{"query": question, "max_rows": maxRows}
+	
+	if verbose {
+		fmt.Printf("🌊 Streaming query (max %d rows)...\n", maxRows)
+	}
+	
+	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "ask", Arguments: args})
+	if err != nil { 
+		log.Fatalf("ask failed: %v", err) 
+	}
+	if res.IsError { 
+		printContent(res.Content)
+		log.Fatalf("ask returned error") 
+	}
+
+	// Handle streaming response
+	if res.StructuredContent != nil {
+		var result map[string]any
+		b, _ := json.Marshal(res.StructuredContent)
+		if err := json.Unmarshal(b, &result); err == nil {
+			printFormattedResult(result, format, verbose)
+			return
+		}
+		
+		// Fallback to original
+		b, _ = json.MarshalIndent(res.StructuredContent, "", "  ")
+		fmt.Println(string(b))
+		return
+	}
+	printContent(res.Content)
 }
+
 func runSearch(ctx context.Context, session *mcp.ClientSession, q, format string, verbose bool) {
 	args := map[string]any{"q": q, "limit": 50}
 	call(ctx, session, "search", args, format, verbose)
 }
+
 
 func call(ctx context.Context, session *mcp.ClientSession, tool string, args map[string]any, format string, verbose bool) {
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args})
@@ -115,9 +146,15 @@ func printFormattedResult(result map[string]any, format string, verbose bool) {
 	// Extract rows and SQL if present
 	rows, hasRows := result["rows"].([]any)
 	sql, hasSQL := result["sql"].(string)
+	note, _ := result["note"].(string)
 	
 	if verbose && hasSQL {
 		fmt.Printf("📝 Generated SQL: %s\n\n", sql)
+	}
+
+	// Show streaming info if available in note
+	if verbose && note != "" && len(rows) > 50 {
+		fmt.Printf("🌊 Auto-streamed results: %s\n", note)
 	}
 
 	if !hasRows || len(rows) == 0 {
@@ -127,6 +164,10 @@ func printFormattedResult(result map[string]any, format string, verbose bool) {
 		}
 		fmt.Println("No results found.")
 		return
+	}
+
+	if verbose && len(rows) > 0 {
+		fmt.Printf("📊 Showing %d results\n\n", len(rows))
 	}
 
 	switch format {
@@ -140,6 +181,7 @@ func printFormattedResult(result map[string]any, format string, verbose bool) {
 		printJSON(result)
 	}
 }
+
 
 func printTable(rows []any) {
 	if len(rows) == 0 {
@@ -259,6 +301,7 @@ func printCSV(rows []any) {
 		writer.Write(row)
 	}
 }
+
 
 func printJSON(data any) {
 	encoder := json.NewEncoder(os.Stdout)

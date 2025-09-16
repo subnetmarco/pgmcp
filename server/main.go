@@ -31,6 +31,8 @@ const (
 	schemaMaxChars      = 18000
 	maxRequestSize      = 1024 * 1024 // 1MB max request size
 	maxQueryLength      = 10000       // Max query length in characters
+	pageSize            = 50          // Default page size for pagination
+	maxPagesAuto        = 10          // Max pages to auto-fetch
 )
 
 type Server struct {
@@ -368,15 +370,42 @@ func requestSizeLimitMiddleware(next http.Handler) http.Handler {
 // ---------- MCP tool handlers ----------
 
 type askInput struct {
-	Query   string `json:"query"`
-	MaxRows int    `json:"max_rows,omitempty"`
-	DryRun  bool   `json:"dry_run,omitempty"`
+	Query     string `json:"query"`
+	MaxRows   int    `json:"max_rows,omitempty"`
+	DryRun    bool   `json:"dry_run,omitempty"`
+	Page      int    `json:"page,omitempty"`      // Page number (0-based)
+	PageSize  int    `json:"page_size,omitempty"` // Results per page
+	StreamAll bool   `json:"stream_all,omitempty"` // Auto-fetch all pages
 }
 
 type askOutput struct {
-	SQL  string           `json:"sql"`
-	Rows []map[string]any `json:"rows,omitempty"`
-	Note string           `json:"note,omitempty"`
+	SQL        string           `json:"sql"`
+	Rows       []map[string]any `json:"rows,omitempty"`
+	Note       string           `json:"note,omitempty"`
+	Page       int              `json:"page,omitempty"`
+	PageSize   int              `json:"page_size,omitempty"`
+	TotalCount int              `json:"total_count,omitempty"`
+	HasMore    bool             `json:"has_more"`
+	NextPage   int              `json:"next_page,omitempty"`
+}
+
+type streamInput struct {
+	Query    string `json:"query"`
+	MaxPages int    `json:"max_pages,omitempty"` // Max pages to fetch (default 10)
+	PageSize int    `json:"page_size,omitempty"` // Results per page (default 50)
+}
+
+type streamOutput struct {
+	SQL        string             `json:"sql"`
+	Pages      []streamPageOutput `json:"pages"`
+	TotalRows  int                `json:"total_rows"`
+	TotalPages int                `json:"total_pages"`
+	Note       string             `json:"note,omitempty"`
+}
+
+type streamPageOutput struct {
+	Page int                `json:"page"`
+	Rows []map[string]any  `json:"rows"`
 }
 
 func (s *Server) handleAsk(ctx context.Context, req *mcp.CallToolRequest, in askInput) (*mcp.CallToolResult, askOutput, error) {
@@ -384,7 +413,8 @@ func (s *Server) handleAsk(ctx context.Context, req *mcp.CallToolRequest, in ask
 	clientIP := "unknown" // MCP doesn't expose client IP directly
 	
 	log.Debug().Str("tool", "ask").Str("query", strings.TrimSpace(in.Query)).
-		Int("max_rows", in.MaxRows).Bool("dry_run", in.DryRun).Str("client_ip", clientIP).Msg("request")
+		Int("max_rows", in.MaxRows).Bool("dry_run", in.DryRun).Int("page", in.Page).
+		Int("page_size", in.PageSize).Bool("stream_all", in.StreamAll).Str("client_ip", clientIP).Msg("request")
 
 	// Input sanitization and validation
 	if err := sanitizeInput(in.Query); err != nil {
@@ -392,12 +422,20 @@ func (s *Server) handleAsk(ctx context.Context, req *mcp.CallToolRequest, in ask
 		log.Debug().Str("tool", "ask").Err(err).Msg("input validation failed")
 		return nil, askOutput{}, err
 	}
+	
 	schemaTxt, err := s.cache.Get(ctx, s.db)
 	if err != nil {
 		log.Debug().Str("tool", "ask").Err(err).Msg("schema load failed")
 		return nil, askOutput{}, err
 	}
-	sql, note, err := s.generateSQL(ctx, in.Query, schemaTxt, minNonZero(in.MaxRows, s.cfg.MaxRows))
+	
+	// Determine page size
+	pageSize := minNonZero(in.PageSize, pageSize)
+	if in.MaxRows > 0 {
+		pageSize = minNonZero(in.MaxRows, pageSize)
+	}
+	
+	sql, note, err := s.generateSQL(ctx, in.Query, schemaTxt, pageSize*10) // Generate SQL for larger limit
 	if err != nil {
 		auditLog("ask_sql_generation_failed", clientIP, in.Query, err.Error(), false)
 		log.Debug().Str("tool", "ask").Err(err).Msg("sql generation failed")
@@ -415,20 +453,41 @@ func (s *Server) handleAsk(ctx context.Context, req *mcp.CallToolRequest, in ask
 		log.Debug().Str("tool", "ask").Dur("dur", time.Since(start)).Msg("dry-run ok")
 		return nil, askOutput{SQL: sql, Note: note}, nil
 	}
+	
 	if err := guardReadOnly(sql); err != nil {
 		auditLog("ask_guard_failed", clientIP, sql, err.Error(), false)
 		log.Debug().Str("tool", "ask").Err(err).Dur("dur", time.Since(start)).Msg("guard failed")
 		return nil, askOutput{SQL: sql}, err
 	}
-	rows, err := s.runReadOnlyQuery(ctx, sql, minNonZero(in.MaxRows, s.cfg.MaxRows))
+
+	// Automatically stream all results
+	maxPages := 20 // Auto-stream up to 20 pages (1000 results with default page size)
+	if in.MaxRows > 0 {
+		maxPages = (in.MaxRows + pageSize - 1) / pageSize // Calculate pages needed
+	}
+	
+	pages, totalRows, err := s.runStreamingQuery(ctx, sql, maxPages, pageSize)
 	if err != nil {
 		auditLog("ask_query_failed", clientIP, sql, err.Error(), false)
 		log.Debug().Str("tool", "ask").Err(err).Dur("dur", time.Since(start)).Msg("query failed")
 		return nil, askOutput{SQL: sql}, err
 	}
-	auditLog("ask_success", clientIP, in.Query, fmt.Sprintf("returned %d rows", len(rows)), true)
-	log.Debug().Str("tool", "ask").Int("row_count", len(rows)).Dur("dur", time.Since(start)).Msg("done")
-	return nil, askOutput{SQL: sql, Rows: rows, Note: note}, nil
+	
+	// Flatten all pages into single result
+	var allRows []map[string]any
+	for _, page := range pages {
+		allRows = append(allRows, page.Rows...)
+	}
+	
+	auditLog("ask_success", clientIP, in.Query, fmt.Sprintf("streamed %d rows across %d pages", totalRows, len(pages)), true)
+	log.Debug().Str("tool", "ask").Int("total_rows", totalRows).Int("pages", len(pages)).
+		Int("returned_rows", len(allRows)).Dur("dur", time.Since(start)).Msg("done")
+	
+	return nil, askOutput{
+		SQL:  sql,
+		Rows: allRows,
+		Note: fmt.Sprintf("%s (streamed %d pages)", note, len(pages)),
+	}, nil
 }
 
 type searchInput struct {
@@ -471,6 +530,66 @@ func (s *Server) handleSearch(ctx context.Context, req *mcp.CallToolRequest, in 
 	auditLog("search_success", clientIP, in.Q, fmt.Sprintf("returned %d rows", len(rows)), true)
 	log.Debug().Str("tool", "search").Int("row_count", len(rows)).Dur("dur", time.Since(start)).Msg("done")
 	return nil, searchOutput{SQL: sql, Rows: rows}, nil
+}
+
+func (s *Server) handleStream(ctx context.Context, req *mcp.CallToolRequest, in streamInput) (*mcp.CallToolResult, streamOutput, error) {
+	start := time.Now()
+	clientIP := "unknown"
+	
+	log.Debug().Str("tool", "stream").Str("query", strings.TrimSpace(in.Query)).
+		Int("max_pages", in.MaxPages).Int("page_size", in.PageSize).Str("client_ip", clientIP).Msg("request")
+
+	// Input sanitization and validation
+	if err := sanitizeInput(in.Query); err != nil {
+		auditLog("stream_input_validation_failed", clientIP, in.Query, err.Error(), false)
+		log.Debug().Str("tool", "stream").Err(err).Msg("input validation failed")
+		return nil, streamOutput{}, err
+	}
+	
+	schemaTxt, err := s.cache.Get(ctx, s.db)
+	if err != nil {
+		log.Debug().Str("tool", "stream").Err(err).Msg("schema load failed")
+		return nil, streamOutput{}, err
+	}
+	
+	// Parameters
+	maxPages := minNonZero(in.MaxPages, maxPagesAuto)
+	pageSize := minNonZero(in.PageSize, pageSize)
+	
+	sql, note, err := s.generateSQL(ctx, in.Query, schemaTxt, pageSize*maxPages)
+	if err != nil {
+		auditLog("stream_sql_generation_failed", clientIP, in.Query, err.Error(), false)
+		log.Debug().Str("tool", "stream").Err(err).Msg("sql generation failed")
+		return nil, streamOutput{}, err
+	}
+	
+	if err := guardReadOnly(sql); err != nil {
+		auditLog("stream_guard_failed", clientIP, sql, err.Error(), false)
+		log.Debug().Str("tool", "stream").Err(err).Msg("guard failed")
+		return nil, streamOutput{SQL: sql}, err
+	}
+
+	// Get all pages
+	pages, totalRows, err := s.runStreamingQuery(ctx, sql, maxPages, pageSize)
+	if err != nil {
+		auditLog("stream_query_failed", clientIP, sql, err.Error(), false)
+		log.Debug().Str("tool", "stream").Err(err).Dur("dur", time.Since(start)).Msg("query failed")
+		return nil, streamOutput{SQL: sql}, err
+	}
+	
+	totalPages := (totalRows + pageSize - 1) / pageSize // Ceiling division
+	
+	auditLog("stream_success", clientIP, in.Query, fmt.Sprintf("returned %d rows in %d pages", totalRows, len(pages)), true)
+	log.Debug().Str("tool", "stream").Int("total_rows", totalRows).Int("pages", len(pages)).
+		Dur("dur", time.Since(start)).Msg("done")
+	
+	return nil, streamOutput{
+		SQL:        sql,
+		Pages:      pages,
+		TotalRows:  totalRows,
+		TotalPages: totalPages,
+		Note:       note,
+	}, nil
 }
 
 // ---------- SQL helpers ----------
@@ -534,6 +653,166 @@ func (s *Server) runReadOnlyQuery(ctx context.Context, sql string, limit int) ([
 	return out, nil
 }
 
+// PaginatedResult holds pagination information
+type PaginatedResult struct {
+	Rows       []map[string]any
+	Page       int
+	PageSize   int
+	TotalCount int
+	HasMore    bool
+	NextPage   int
+}
+
+func (s *Server) runPaginatedQuery(ctx context.Context, sql string, page, pageSize int) (*PaginatedResult, error) {
+	// First, get total count
+	countSQL := fmt.Sprintf("WITH query AS (%s) SELECT COUNT(*) FROM query", sql)
+	
+	ctxTO, cancel := context.WithTimeout(ctx, s.cfg.QueryTO)
+	defer cancel()
+	
+	conn, err := s.db.Acquire(ctxTO)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
+
+	tx, err := conn.BeginTx(ctxTO, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctxTO)
+
+	var totalCount int
+	if err := tx.QueryRow(ctxTO, countSQL).Scan(&totalCount); err != nil {
+		return nil, fmt.Errorf("failed to get total count: %w", err)
+	}
+
+	// Get paginated data
+	offset := page * pageSize
+	paginatedSQL := fmt.Sprintf("WITH query AS (%s) SELECT * FROM query LIMIT %d OFFSET %d", sql, pageSize, offset)
+	
+	rows, err := tx.Query(ctxTO, paginatedSQL)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	flds := rows.FieldDescriptions()
+	out := make([]map[string]any, 0, pageSize)
+	for rows.Next() {
+		vals, err := rows.Values()
+		if err != nil {
+			return nil, err
+		}
+		row := make(map[string]any, len(flds))
+		for i, f := range flds {
+			row[string(f.Name)] = vals[i]
+		}
+		out = append(out, row)
+	}
+	
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	
+	if err := tx.Commit(ctxTO); err != nil {
+		return nil, err
+	}
+
+	hasMore := offset+len(out) < totalCount
+	nextPage := page + 1
+	if !hasMore {
+		nextPage = 0
+	}
+
+	return &PaginatedResult{
+		Rows:       out,
+		Page:       page,
+		PageSize:   pageSize,
+		TotalCount: totalCount,
+		HasMore:    hasMore,
+		NextPage:   nextPage,
+	}, nil
+}
+
+func (s *Server) runStreamingQuery(ctx context.Context, sql string, maxPages, pageSize int) ([]streamPageOutput, int, error) {
+	// First, get total count
+	countSQL := fmt.Sprintf("WITH query AS (%s) SELECT COUNT(*) FROM query", sql)
+	
+	ctxTO, cancel := context.WithTimeout(ctx, s.cfg.QueryTO*time.Duration(maxPages))
+	defer cancel()
+	
+	conn, err := s.db.Acquire(ctxTO)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer conn.Release()
+
+	tx, err := conn.BeginTx(ctxTO, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, 0, err
+	}
+	defer tx.Rollback(ctxTO)
+
+	var totalCount int
+	if err := tx.QueryRow(ctxTO, countSQL).Scan(&totalCount); err != nil {
+		return nil, 0, fmt.Errorf("failed to get total count: %w", err)
+	}
+
+	// Calculate actual pages to fetch
+	totalPages := (totalCount + pageSize - 1) / pageSize
+	pagesToFetch := minNonZero(maxPages, totalPages)
+	
+	var pages []streamPageOutput
+	
+	// Fetch pages
+	for page := 0; page < pagesToFetch; page++ {
+		offset := page * pageSize
+		paginatedSQL := fmt.Sprintf("WITH query AS (%s) SELECT * FROM query LIMIT %d OFFSET %d", sql, pageSize, offset)
+		
+		rows, err := tx.Query(ctxTO, paginatedSQL)
+		if err != nil {
+			return nil, 0, err
+		}
+
+		flds := rows.FieldDescriptions()
+		pageRows := make([]map[string]any, 0, pageSize)
+		for rows.Next() {
+			vals, err := rows.Values()
+			if err != nil {
+				rows.Close()
+				return nil, 0, err
+			}
+			row := make(map[string]any, len(flds))
+			for i, f := range flds {
+				row[string(f.Name)] = vals[i]
+			}
+			pageRows = append(pageRows, row)
+		}
+		rows.Close()
+		
+		if err := rows.Err(); err != nil {
+			return nil, 0, err
+		}
+		
+		pages = append(pages, streamPageOutput{
+			Page: page,
+			Rows: pageRows,
+		})
+		
+		// Stop if no more rows
+		if len(pageRows) < pageSize {
+			break
+		}
+	}
+	
+	if err := tx.Commit(ctxTO); err != nil {
+		return nil, 0, err
+	}
+
+	return pages, totalCount, nil
+}
+
 func (s *Server) buildSearchSQL(ctx context.Context, q string, limit int) (string, error) {
 	const meta = `
 SELECT table_schema, table_name, column_name
@@ -578,49 +857,31 @@ ORDER BY table_schema, table_name, ordinal_position;
 }
 
 func (s *Server) generateSQL(ctx context.Context, question, schema string, maxRows int) (string, string, error) {
-	sys := `You translate plain English questions into a SINGLE, safe PostgreSQL query.
-	Rules:
+	sys := `You translate plain English questions into a SINGLE, safe PostgreSQL query for ANY PostgreSQL database.
+
+	Core Rules:
 	- Use only read-only SQL (WITH/SELECT). No writes, DDL, or side effects.
-	- Prefer obvious FK joins. Return concise columns with aliases.
+	- Use proper JOINs based on foreign key relationships shown in the schema.
 	- Always include an explicit LIMIT <= ` + fmt.Sprint(maxRows) + `.
 	- Do not add semicolons.
-	- Never use placeholder literals like 'specific item' or 'some user'.
-	  If the item/user isn't specified, infer reasonably:
-	  • for "specific item" with no ID/sku/title: pick the most recently purchased item.
-	  • for "last user": compute it from latest order timestamps.
-	- If multiple interpretations are plausible, choose the simplest and document via column aliases.
+	- Return concise, meaningful column aliases.
 
-	CRITICAL - Analyze the question grammar to determine if user wants ONE result or MULTIPLE results:
+	Query Scope Rules:
+	- SINGULAR questions ("Who is the...", "What is the...") → LIMIT 1
+	- PLURAL questions ("Who are the...", "What are the...") → LIMIT 10-20
+	- COUNT questions ("How many...") → Return COUNT, no additional LIMIT
+	- LIST questions ("List all...", "Show all...") → LIMIT 50
+	- COMPARISON questions ("Compare X and Y...") → Return just the compared items
 
-	SINGULAR (return exactly 1 result with LIMIT 1):
-	- "Who is THE user..." (e.g., "Who is the user with the most reviews?")
-	- "What is THE product..." (e.g., "What is the most expensive product?")
-	- "Which customer has THE most..." (implies single customer)
-	- "Show me THE top seller..." (singular "seller")
-	- "Find THE best..." (singular with "the")
-	- "Who has THE highest..." (implies one person)
-	- "What product has THE lowest..." (singular "product")
-	- Any question with "THE" + singular noun + superlative → LIMIT 1
+	Universal Data Handling:
+	- Work ONLY with tables and columns shown in the schema summary below
+	- NEVER assume specific data values, enum values, or business logic
+	- NEVER filter by assumed status values (completed, active, etc.) unless explicitly mentioned
+	- If user asks for "top X" or "most Y", aggregate and sort the available data as-is
+	- Use column names and relationships exactly as they appear in the schema
+	- When in doubt, include more data rather than filtering it out
+	- Focus on structural relationships (JOINs) rather than data content assumptions
 
-	PLURAL (return multiple results with LIMIT 10-20):
-	- "Who are THE users..." (e.g., "Who are the users with the most reviews?")
-	- "What are THE products..." (plural "products")
-	- "Which customers have..." (plural "customers")
-	- "Show me THE top sellers..." (plural "sellers")
-	- "Find THE best products..." (plural "products")
-	- "Who are THE highest..." (plural context)
-	- "What products have..." (plural "products")
-
-	SPECIAL CASES:
-	- "How many..." → COUNT query, no additional LIMIT needed
-	- "What percentage..." → Calculation, LIMIT 1
-	- "List..." or "Show all..." → LIMIT 50 (reasonable subset)
-	- "Compare X and Y..." → Return just the compared items
-	- Questions about trends/patterns → Group by time periods, LIMIT 20
-
-	DEFAULT: When in doubt, if the question uses singular nouns and "the", use LIMIT 1. 
-	If plural nouns or asking for multiple items, use LIMIT 10-20.
-	
 	Schema summary:
 	` + schema
 
@@ -675,12 +936,16 @@ func main() {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "ask",
-		Description: "Answer questions about the connected PostgreSQL database by generating safe, read-only SQL.",
+		Description: "Answer questions about the connected PostgreSQL database by generating safe, read-only SQL. Automatically streams all results.",
 	}, srv.handleAsk)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "search",
 		Description: "Search free text across all tables/columns (ILIKE).",
 	}, srv.handleSearch)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "stream",
+		Description: "Stream large result sets by automatically fetching all pages. Returns complete results progressively.",
+	}, srv.handleStream)
 
 	// --- HTTP + SSE transport ---
 	addr := envDefault("HTTP_ADDR", ":8080")

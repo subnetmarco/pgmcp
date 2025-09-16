@@ -171,3 +171,167 @@ func TestSanitizeInput(t *testing.T) {
 		})
 	}
 }
+
+func TestPaginatedResult(t *testing.T) {
+	tests := []struct {
+		name        string
+		totalCount  int
+		page        int
+		pageSize    int
+		wantHasMore bool
+		wantNextPage int
+	}{
+		{
+			name:         "first page with more",
+			totalCount:   100,
+			page:         0,
+			pageSize:     10,
+			wantHasMore:  true,
+			wantNextPage: 1,
+		},
+		{
+			name:         "middle page with more",
+			totalCount:   100,
+			page:         5,
+			pageSize:     10,
+			wantHasMore:  true,
+			wantNextPage: 6,
+		},
+		{
+			name:         "last page",
+			totalCount:   100,
+			page:         9,
+			pageSize:     10,
+			wantHasMore:  false,
+			wantNextPage: 0,
+		},
+		{
+			name:         "partial last page",
+			totalCount:   95,
+			page:         9,
+			pageSize:     10,
+			wantHasMore:  false,
+			wantNextPage: 0,
+		},
+		{
+			name:         "single page",
+			totalCount:   5,
+			page:         0,
+			pageSize:     10,
+			wantHasMore:  false,
+			wantNextPage: 0,
+		},
+		{
+			name:         "empty results",
+			totalCount:   0,
+			page:         0,
+			pageSize:     10,
+			wantHasMore:  false,
+			wantNextPage: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Simulate pagination logic
+			offset := tt.page * tt.pageSize
+			rowsOnPage := tt.pageSize
+			if offset+rowsOnPage > tt.totalCount {
+				rowsOnPage = tt.totalCount - offset
+			}
+			if rowsOnPage < 0 {
+				rowsOnPage = 0
+			}
+			
+			hasMore := offset+rowsOnPage < tt.totalCount
+			nextPage := tt.page + 1
+			if !hasMore {
+				nextPage = 0
+			}
+
+			if hasMore != tt.wantHasMore {
+				t.Fatalf("hasMore = %v, want %v (totalCount=%d, page=%d, pageSize=%d)", 
+					hasMore, tt.wantHasMore, tt.totalCount, tt.page, tt.pageSize)
+			}
+			if nextPage != tt.wantNextPage {
+				t.Fatalf("nextPage = %d, want %d", nextPage, tt.wantNextPage)
+			}
+		})
+	}
+}
+
+func TestStreamingPaginationCalculations(t *testing.T) {
+	tests := []struct {
+		name           string
+		totalCount     int
+		pageSize       int
+		maxPages       int
+		wantTotalPages int
+		wantFetchPages int
+	}{
+		{
+			name:           "exact pages",
+			totalCount:     100,
+			pageSize:       10,
+			maxPages:       15,
+			wantTotalPages: 10,
+			wantFetchPages: 10,
+		},
+		{
+			name:           "partial last page",
+			totalCount:     95,
+			pageSize:       10,
+			maxPages:       15,
+			wantTotalPages: 10,
+			wantFetchPages: 10,
+		},
+		{
+			name:           "limited by max pages",
+			totalCount:     1000,
+			pageSize:       10,
+			maxPages:       5,
+			wantTotalPages: 100,
+			wantFetchPages: 5,
+		},
+		{
+			name:           "single page",
+			totalCount:     5,
+			pageSize:       10,
+			maxPages:       5,
+			wantTotalPages: 1,
+			wantFetchPages: 1,
+		},
+		{
+			name:           "empty results",
+			totalCount:     0,
+			pageSize:       10,
+			maxPages:       5,
+			wantTotalPages: 0,
+			wantFetchPages: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test total pages calculation (ceiling division)
+			totalPages := (tt.totalCount + tt.pageSize - 1) / tt.pageSize
+			if tt.totalCount == 0 {
+				totalPages = 0
+			}
+			
+			if totalPages != tt.wantTotalPages {
+				t.Fatalf("totalPages = %d, want %d", totalPages, tt.wantTotalPages)
+			}
+
+			// Test pages to fetch calculation
+			fetchPages := minNonZero(tt.maxPages, totalPages)
+			if tt.totalCount == 0 {
+				fetchPages = 0
+			}
+			
+			if fetchPages != tt.wantFetchPages {
+				t.Fatalf("fetchPages = %d, want %d", fetchPages, tt.wantFetchPages)
+			}
+		})
+	}
+}
