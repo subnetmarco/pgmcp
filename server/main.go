@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -27,14 +29,17 @@ const (
 	defaultMaxRows      = 200
 	maxModelTokens      = 2000
 	schemaMaxChars      = 18000
+	maxRequestSize      = 1024 * 1024 // 1MB max request size
+	maxQueryLength      = 10000       // Max query length in characters
 )
 
 type Server struct {
-	db    *pgxpool.Pool
-	llm   openai.Client // value type
-	model string
-	cache *SchemaCache
-	cfg   Config
+	db     *pgxpool.Pool
+	llm    openai.Client // value type
+	model  string
+	cache  *SchemaCache
+	cfg    Config
+	server *http.Server
 }
 
 type Config struct {
@@ -45,6 +50,39 @@ type Config struct {
 	SchemaTTL   time.Duration
 	QueryTO     time.Duration
 	MaxRows     int
+}
+
+// Validate checks if the configuration is valid and returns detailed errors
+func (c *Config) Validate() error {
+	var errs []string
+
+	if c.DatabaseURL == "" {
+		errs = append(errs, "DATABASE_URL is required")
+	}
+
+	if c.MaxRows <= 0 {
+		errs = append(errs, "MAX_ROWS must be greater than 0")
+	} else if c.MaxRows > 10000 {
+		errs = append(errs, "MAX_ROWS cannot exceed 10000 (too many rows could cause memory issues)")
+	}
+
+	if c.QueryTO < time.Second {
+		errs = append(errs, "QUERY_TIMEOUT must be at least 1 second")
+	} else if c.QueryTO > 5*time.Minute {
+		errs = append(errs, "QUERY_TIMEOUT cannot exceed 5 minutes")
+	}
+
+	if c.SchemaTTL < 30*time.Second {
+		errs = append(errs, "SCHEMA_TTL must be at least 30 seconds")
+	} else if c.SchemaTTL > 24*time.Hour {
+		errs = append(errs, "SCHEMA_TTL cannot exceed 24 hours")
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("configuration validation failed:\n  - %s", strings.Join(errs, "\n  - "))
+	}
+
+	return nil
 }
 
 type SchemaCache struct {
@@ -139,24 +177,37 @@ ORDER BY 1;`
 }
 
 func mustConfig() Config {
+	var warnings []string
+
 	ttl := defaultSchemaTTL
 	if v := os.Getenv("SCHEMA_TTL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			ttl = d
+		} else {
+			warnings = append(warnings, fmt.Sprintf("invalid SCHEMA_TTL '%s': %v, using default %v", v, err, defaultSchemaTTL))
 		}
 	}
+
 	qto := defaultQueryTimeout
 	if v := os.Getenv("QUERY_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			qto = d
+		} else {
+			warnings = append(warnings, fmt.Sprintf("invalid QUERY_TIMEOUT '%s': %v, using default %v", v, err, defaultQueryTimeout))
 		}
 	}
+
 	mr := defaultMaxRows
 	if v := os.Getenv("MAX_ROWS"); v != "" {
 		if n, err := fmt.Sscanf(v, "%d", &mr); n == 1 && err == nil && mr > 0 {
+			// Successfully parsed
+		} else {
+			warnings = append(warnings, fmt.Sprintf("invalid MAX_ROWS '%s': must be a positive integer, using default %d", v, defaultMaxRows))
+			mr = defaultMaxRows
 		}
 	}
-	return Config{
+
+	cfg := Config{
 		DatabaseURL: envOrDie("DATABASE_URL"),
 		OpenAIKey:   os.Getenv("OPENAI_API_KEY"),
 		OpenAIModel: envDefault("OPENAI_MODEL", "gpt-4o-mini"),
@@ -165,6 +216,18 @@ func mustConfig() Config {
 		QueryTO:     qto,
 		MaxRows:     mr,
 	}
+
+	// Print warnings
+	for _, warning := range warnings {
+		log.Warn().Msg(warning)
+	}
+
+	// Validate configuration
+	if err := cfg.Validate(); err != nil {
+		log.Fatal().Err(err).Msg("invalid configuration")
+	}
+
+	return cfg
 }
 
 func envOrDie(k string) string {
@@ -216,6 +279,33 @@ func newServer(ctx context.Context, cfg Config) (*Server, error) {
 	}, nil
 }
 
+// Shutdown gracefully shuts down the server
+func (s *Server) Shutdown(ctx context.Context) error {
+	log.Info().Msg("shutting down server gracefully")
+	
+	var errs []error
+	
+	// Shutdown HTTP server
+	if s.server != nil {
+		if err := s.server.Shutdown(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("HTTP server shutdown error: %w", err))
+		}
+	}
+	
+	// Close database connections
+	if s.db != nil {
+		s.db.Close()
+		log.Info().Msg("database connections closed")
+	}
+	
+	if len(errs) > 0 {
+		return fmt.Errorf("shutdown errors: %v", errs)
+	}
+	
+	log.Info().Msg("server shutdown complete")
+	return nil
+}
+
 // ---------- helpers ----------
 
 func minNonZero(v, max int) int {
@@ -226,6 +316,53 @@ func minNonZero(v, max int) int {
 		return max
 	}
 	return v
+}
+
+// sanitizeInput sanitizes and validates user input
+func sanitizeInput(input string) error {
+	input = strings.TrimSpace(input)
+	
+	if len(input) == 0 {
+		return errors.New("input cannot be empty")
+	}
+	
+	if len(input) > maxQueryLength {
+		return fmt.Errorf("input too long: %d characters (max %d)", len(input), maxQueryLength)
+	}
+	
+	// Check for potentially malicious patterns
+	suspicious := []string{
+		"--", "/*", "*/", "xp_", "sp_", "exec", "execute",
+		"union", "information_schema", "pg_catalog",
+	}
+	
+	lowerInput := strings.ToLower(input)
+	for _, pattern := range suspicious {
+		if strings.Contains(lowerInput, pattern) {
+			log.Warn().Str("pattern", pattern).Str("input", input).Msg("suspicious pattern detected in input")
+		}
+	}
+	
+	return nil
+}
+
+// auditLog logs security-relevant events
+func auditLog(event, user, query, result string, success bool) {
+	log.Info().
+		Str("event", event).
+		Str("user", user).
+		Str("query", query).
+		Str("result", result).
+		Bool("success", success).
+		Msg("audit_log")
+}
+
+// requestSizeLimitMiddleware limits the size of incoming requests
+func requestSizeLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestSize)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ---------- MCP tool handlers ----------
@@ -242,14 +379,17 @@ type askOutput struct {
 	Note string           `json:"note,omitempty"`
 }
 
-func (s *Server) handleAsk(ctx context.Context, _ *mcp.CallToolRequest, in askInput) (*mcp.CallToolResult, askOutput, error) {
+func (s *Server) handleAsk(ctx context.Context, req *mcp.CallToolRequest, in askInput) (*mcp.CallToolResult, askOutput, error) {
 	start := time.Now()
+	clientIP := "unknown" // MCP doesn't expose client IP directly
+	
 	log.Debug().Str("tool", "ask").Str("query", strings.TrimSpace(in.Query)).
-		Int("max_rows", in.MaxRows).Bool("dry_run", in.DryRun).Msg("request")
+		Int("max_rows", in.MaxRows).Bool("dry_run", in.DryRun).Str("client_ip", clientIP).Msg("request")
 
-	if strings.TrimSpace(in.Query) == "" {
-		err := errors.New("query is empty")
-		log.Debug().Str("tool", "ask").Err(err).Msg("reject")
+	// Input sanitization and validation
+	if err := sanitizeInput(in.Query); err != nil {
+		auditLog("ask_input_validation_failed", clientIP, in.Query, err.Error(), false)
+		log.Debug().Str("tool", "ask").Err(err).Msg("input validation failed")
 		return nil, askOutput{}, err
 	}
 	schemaTxt, err := s.cache.Get(ctx, s.db)
@@ -259,6 +399,7 @@ func (s *Server) handleAsk(ctx context.Context, _ *mcp.CallToolRequest, in askIn
 	}
 	sql, note, err := s.generateSQL(ctx, in.Query, schemaTxt, minNonZero(in.MaxRows, s.cfg.MaxRows))
 	if err != nil {
+		auditLog("ask_sql_generation_failed", clientIP, in.Query, err.Error(), false)
 		log.Debug().Str("tool", "ask").Err(err).Msg("sql generation failed")
 		return nil, askOutput{}, err
 	}
@@ -266,21 +407,26 @@ func (s *Server) handleAsk(ctx context.Context, _ *mcp.CallToolRequest, in askIn
 
 	if in.DryRun {
 		if err := guardReadOnly(sql); err != nil {
+			auditLog("ask_dry_run_guard_failed", clientIP, sql, err.Error(), false)
 			log.Debug().Str("tool", "ask").Err(err).Dur("dur", time.Since(start)).Msg("dry-run guard failed")
 			return nil, askOutput{SQL: sql, Note: note}, err
 		}
+		auditLog("ask_dry_run_success", clientIP, in.Query, sql, true)
 		log.Debug().Str("tool", "ask").Dur("dur", time.Since(start)).Msg("dry-run ok")
 		return nil, askOutput{SQL: sql, Note: note}, nil
 	}
 	if err := guardReadOnly(sql); err != nil {
+		auditLog("ask_guard_failed", clientIP, sql, err.Error(), false)
 		log.Debug().Str("tool", "ask").Err(err).Dur("dur", time.Since(start)).Msg("guard failed")
 		return nil, askOutput{SQL: sql}, err
 	}
 	rows, err := s.runReadOnlyQuery(ctx, sql, minNonZero(in.MaxRows, s.cfg.MaxRows))
 	if err != nil {
+		auditLog("ask_query_failed", clientIP, sql, err.Error(), false)
 		log.Debug().Str("tool", "ask").Err(err).Dur("dur", time.Since(start)).Msg("query failed")
 		return nil, askOutput{SQL: sql}, err
 	}
+	auditLog("ask_success", clientIP, in.Query, fmt.Sprintf("returned %d rows", len(rows)), true)
 	log.Debug().Str("tool", "ask").Int("row_count", len(rows)).Dur("dur", time.Since(start)).Msg("done")
 	return nil, askOutput{SQL: sql, Rows: rows, Note: note}, nil
 }
@@ -295,18 +441,22 @@ type searchOutput struct {
 	Rows []map[string]any `json:"rows"`
 }
 
-func (s *Server) handleSearch(ctx context.Context, _ *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, searchOutput, error) {
+func (s *Server) handleSearch(ctx context.Context, req *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, searchOutput, error) {
 	start := time.Now()
-	log.Debug().Str("tool", "search").Str("q", strings.TrimSpace(in.Q)).Int("limit", in.Limit).Msg("request")
+	clientIP := "unknown" // MCP doesn't expose client IP directly
+	
+	log.Debug().Str("tool", "search").Str("q", strings.TrimSpace(in.Q)).Int("limit", in.Limit).Str("client_ip", clientIP).Msg("request")
 
-	if strings.TrimSpace(in.Q) == "" {
-		err := errors.New("q is empty")
-		log.Debug().Str("tool", "search").Err(err).Msg("reject")
+	// Input sanitization and validation
+	if err := sanitizeInput(in.Q); err != nil {
+		auditLog("search_input_validation_failed", clientIP, in.Q, err.Error(), false)
+		log.Debug().Str("tool", "search").Err(err).Msg("input validation failed")
 		return nil, searchOutput{}, err
 	}
 	limit := minNonZero(in.Limit, 50)
 	sql, err := s.buildSearchSQL(ctx, in.Q, limit)
 	if err != nil {
+		auditLog("search_sql_build_failed", clientIP, in.Q, err.Error(), false)
 		log.Debug().Str("tool", "search").Err(err).Msg("build sql failed")
 		return nil, searchOutput{}, err
 	}
@@ -314,9 +464,11 @@ func (s *Server) handleSearch(ctx context.Context, _ *mcp.CallToolRequest, in se
 
 	rows, err := s.runReadOnlyQuery(ctx, sql, limit)
 	if err != nil {
+		auditLog("search_query_failed", clientIP, sql, err.Error(), false)
 		log.Debug().Str("tool", "search").Err(err).Dur("dur", time.Since(start)).Msg("query failed")
 		return nil, searchOutput{SQL: sql}, err
 	}
+	auditLog("search_success", clientIP, in.Q, fmt.Sprintf("returned %d rows", len(rows)), true)
 	log.Debug().Str("tool", "search").Int("row_count", len(rows)).Dur("dur", time.Since(start)).Msg("done")
 	return nil, searchOutput{SQL: sql, Rows: rows}, nil
 }
@@ -433,7 +585,7 @@ func (s *Server) generateSQL(ctx context.Context, question, schema string, maxRo
 	- Always include an explicit LIMIT <= ` + fmt.Sprint(maxRows) + `.
 	- Do not add semicolons.
 	- Never use placeholder literals like 'specific item' or 'some user'.
-	  If the item/user isn’t specified, infer reasonably:
+	  If the item/user isn't specified, infer reasonably:
 	  • for "specific item" with no ID/sku/title: pick the most recently purchased item.
 	  • for "last user": compute it from latest order timestamps.
 	- If multiple interpretations are plausible, choose the simplest and document via column aliases.
@@ -510,6 +662,7 @@ func main() {
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 			if strings.TrimSpace(got) != bearer {
+				auditLog("auth_failed", r.RemoteAddr, "", "invalid bearer token", false)
 				w.WriteHeader(http.StatusUnauthorized)
 				_, _ = w.Write([]byte("unauthorized"))
 				return
@@ -518,12 +671,48 @@ func main() {
 		})
 	}
 
+	// Apply middleware
+	handler = requestSizeLimitMiddleware(handler)
+
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200); _, _ = w.Write([]byte("ok")) })
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { 
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	// Create HTTP server
+	httpServer := &http.Server{
+		Addr:         addr,
+		Handler:      mux,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+	srv.server = httpServer
+
+	// Set up graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		log.Info().Msg("received shutdown signal")
+
+		// Give ongoing requests 30 seconds to complete
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Error().Err(err).Msg("error during shutdown")
+		}
+		os.Exit(0)
+	}()
 
 	log.Info().Str("addr", addr).Str("path", path).Msg("starting MCP server on HTTP SSE")
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatal().Err(err).Msg("server stopped")
+	auditLog("server_start", "system", "", addr, true)
+	
+	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatal().Err(err).Msg("server error")
 	}
 }

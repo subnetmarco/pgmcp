@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // ----- helpers -----

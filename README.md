@@ -34,7 +34,10 @@ The project consists of two main components:
 - **MCP Client**: Command-line client for testing and demonstration
 - **Multiple Query Support**: Can execute multiple questions in a single run
 - **Search Functionality**: Supports free-text search across database
-- **Pretty Output**: Formats JSON responses for readability
+- **Multiple Output Formats**: Table, JSON, and CSV output formats
+- **Enhanced Error Handling**: Detailed error messages with recovery suggestions
+- **Verbose Mode**: Optional detailed output with SQL queries and connection status
+- **Flexible Configuration**: Command-line flags and environment variables
 
 ## Database Schema
 
@@ -117,11 +120,35 @@ export OPENAI_API_KEY="your-api-key"
 ./pgmcp-client -search "ada@example.com"
 ```
 
-### Dry Run Mode
+### Output Formats
 
 ```bash
-# Generate SQL without executing
-./pgmcp-client -ask "Show me all orders" -dry-run
+# Table format (default) - clean, readable tables
+./pgmcp-client -ask "Show me all users" -format table
+
+# JSON format - structured data for processing
+./pgmcp-client -ask "Show me all users" -format json
+
+# CSV format - for spreadsheet import
+./pgmcp-client -ask "Show me all users" -format csv
+```
+
+### Advanced Client Options
+
+```bash
+# Verbose output with SQL queries and connection details
+./pgmcp-client -ask "Show recent orders" -verbose
+
+# Custom timeout and server URL
+./pgmcp-client -url "http://prod-server:8080/mcp/sse" -timeout 30s -ask "Query"
+
+# Multiple queries in one run
+./pgmcp-client -ask "Show users" -ask "Show orders" -search "cables"
+
+# Using environment variables
+export PGMCP_SERVER_URL="http://localhost:8080/mcp/sse"
+export PGMCP_AUTH_BEARER="your-token"
+./pgmcp-client -ask "Your query"
 ```
 
 ## API Tools
