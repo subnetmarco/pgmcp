@@ -284,26 +284,26 @@ func newServer(ctx context.Context, cfg Config) (*Server, error) {
 // Shutdown gracefully shuts down the server
 func (s *Server) Shutdown(ctx context.Context) error {
 	log.Info().Msg("shutting down server gracefully")
-	
+
 	var errs []error
-	
+
 	// Shutdown HTTP server
 	if s.server != nil {
 		if err := s.server.Shutdown(ctx); err != nil {
 			errs = append(errs, fmt.Errorf("HTTP server shutdown error: %w", err))
 		}
 	}
-	
+
 	// Close database connections
 	if s.db != nil {
 		s.db.Close()
 		log.Info().Msg("database connections closed")
 	}
-	
+
 	if len(errs) > 0 {
 		return fmt.Errorf("shutdown errors: %v", errs)
 	}
-	
+
 	log.Info().Msg("server shutdown complete")
 	return nil
 }
@@ -323,28 +323,28 @@ func minNonZero(v, max int) int {
 // sanitizeInput sanitizes and validates user input
 func sanitizeInput(input string) error {
 	input = strings.TrimSpace(input)
-	
+
 	if len(input) == 0 {
 		return errors.New("input cannot be empty")
 	}
-	
+
 	if len(input) > maxQueryLength {
 		return fmt.Errorf("input too long: %d characters (max %d)", len(input), maxQueryLength)
 	}
-	
+
 	// Check for potentially malicious patterns
 	suspicious := []string{
 		"--", "/*", "*/", "xp_", "sp_", "exec", "execute",
 		"union", "information_schema", "pg_catalog",
 	}
-	
+
 	lowerInput := strings.ToLower(input)
 	for _, pattern := range suspicious {
 		if strings.Contains(lowerInput, pattern) {
 			log.Warn().Str("pattern", pattern).Str("input", input).Msg("suspicious pattern detected in input")
 		}
 	}
-	
+
 	return nil
 }
 
@@ -362,19 +362,19 @@ func auditLog(event, user, query, result string, success bool) {
 // isExpensiveQuery detects potentially expensive query patterns
 func isExpensiveQuery(sql string) bool {
 	sqlLower := strings.ToLower(sql)
-	
+
 	// Detect expensive patterns (generic)
 	expensivePatterns := []string{
-		"cross join",     // Cartesian products
-		"left join",      // LEFT JOINs can be expensive
+		"cross join", // Cartesian products
+		"left join",  // LEFT JOINs can be expensive
 	}
-	
+
 	for _, pattern := range expensivePatterns {
 		if strings.Contains(sqlLower, pattern) {
 			return true
 		}
 	}
-	
+
 	// Count number of JOINs - more than 2 is expensive
 	joinCount := strings.Count(sqlLower, " join ")
 	return joinCount > 2
@@ -383,36 +383,36 @@ func isExpensiveQuery(sql string) bool {
 // simplifyExpensiveQuery rewrites expensive queries to be more performant
 func simplifyExpensiveQuery(sql, originalQuery string) string {
 	sqlLower := strings.ToLower(sql)
-	
+
 	// For queries with expensive JOINs, return a helpful error message instead
 	if strings.Contains(sqlLower, "join") && (strings.Contains(sqlLower, "left join") || strings.Count(sqlLower, " join ") > 1) {
 		return "SELECT 'Query too complex - please try a simpler question or ask about individual tables' AS message LIMIT 1"
 	}
-	
+
 	return sql // Return original if no simplification needed
 }
 
 // validateSQLBasic performs basic SQL validation to catch common errors
 func validateSQLBasic(sql string) error {
 	sqlLower := strings.ToLower(sql)
-	
+
 	// Check for basic SQL structure
 	if !strings.Contains(sqlLower, "select") {
 		return fmt.Errorf("query must contain SELECT")
 	}
-	
+
 	// Check for balanced parentheses
 	openCount := strings.Count(sql, "(")
 	closeCount := strings.Count(sql, ")")
 	if openCount != closeCount {
 		return fmt.Errorf("unbalanced parentheses: %d open, %d close", openCount, closeCount)
 	}
-	
+
 	// Check for common syntax issues
 	if strings.Contains(sqlLower, "select select") {
 		return fmt.Errorf("duplicate SELECT keywords detected")
 	}
-	
+
 	return nil
 }
 
@@ -430,8 +430,8 @@ type askInput struct {
 	Query     string `json:"query"`
 	MaxRows   int    `json:"max_rows,omitempty"`
 	DryRun    bool   `json:"dry_run,omitempty"`
-	Page      int    `json:"page,omitempty"`      // Page number (0-based)
-	PageSize  int    `json:"page_size,omitempty"` // Results per page
+	Page      int    `json:"page,omitempty"`       // Page number (0-based)
+	PageSize  int    `json:"page_size,omitempty"`  // Results per page
 	StreamAll bool   `json:"stream_all,omitempty"` // Auto-fetch all pages
 }
 
@@ -461,14 +461,14 @@ type streamOutput struct {
 }
 
 type streamPageOutput struct {
-	Page int                `json:"page"`
-	Rows []map[string]any  `json:"rows"`
+	Page int              `json:"page"`
+	Rows []map[string]any `json:"rows"`
 }
 
 func (s *Server) handleAsk(ctx context.Context, req *mcp.CallToolRequest, in askInput) (*mcp.CallToolResult, askOutput, error) {
 	start := time.Now()
 	clientIP := "unknown" // MCP doesn't expose client IP directly
-	
+
 	log.Debug().Str("tool", "ask").Str("query", strings.TrimSpace(in.Query)).
 		Int("max_rows", in.MaxRows).Bool("dry_run", in.DryRun).Int("page", in.Page).
 		Int("page_size", in.PageSize).Bool("stream_all", in.StreamAll).Str("client_ip", clientIP).Msg("request")
@@ -479,19 +479,19 @@ func (s *Server) handleAsk(ctx context.Context, req *mcp.CallToolRequest, in ask
 		log.Debug().Str("tool", "ask").Err(err).Msg("input validation failed")
 		return nil, askOutput{}, err
 	}
-	
+
 	schemaTxt, err := s.cache.Get(ctx, s.db)
 	if err != nil {
 		log.Debug().Str("tool", "ask").Err(err).Msg("schema load failed")
 		return nil, askOutput{}, err
 	}
-	
+
 	// Determine page size
 	pageSize := minNonZero(in.PageSize, pageSize)
 	if in.MaxRows > 0 {
 		pageSize = minNonZero(in.MaxRows, pageSize)
 	}
-	
+
 	sql, note, err := s.generateSQL(ctx, in.Query, schemaTxt, pageSize*10) // Generate SQL for larger limit
 	if err != nil {
 		auditLog("ask_sql_generation_failed", clientIP, in.Query, err.Error(), false)
@@ -510,7 +510,7 @@ func (s *Server) handleAsk(ctx context.Context, req *mcp.CallToolRequest, in ask
 		log.Debug().Str("tool", "ask").Dur("dur", time.Since(start)).Msg("dry-run ok")
 		return nil, askOutput{SQL: sql, Note: note}, nil
 	}
-	
+
 	if err := guardReadOnly(sql); err != nil {
 		auditLog("ask_guard_failed", clientIP, sql, err.Error(), false)
 		log.Debug().Str("tool", "ask").Err(err).Dur("dur", time.Since(start)).Msg("guard failed")
@@ -535,19 +535,19 @@ func (s *Server) handleAsk(ctx context.Context, req *mcp.CallToolRequest, in ask
 	if in.MaxRows > 0 {
 		maxPages = (in.MaxRows + pageSize - 1) / pageSize // Calculate pages needed
 	}
-	
+
 	pages, totalRows, err := s.runStreamingQuery(ctx, sql, maxPages, pageSize)
 	if err != nil {
 		// If query failed due to column errors, try to provide a helpful response
 		if strings.Contains(err.Error(), "column") && strings.Contains(err.Error(), "does not exist") {
 			auditLog("ask_query_failed", clientIP, sql, err.Error(), false)
 			log.Debug().Str("tool", "ask").Err(err).Dur("dur", time.Since(start)).Msg("query failed - column not found")
-			
+
 			// Return helpful error message instead of failing
 			errorRows := []map[string]any{
 				{
-					"error":       "Column not found in generated query",
-					"suggestion":  "Try rephrasing your question or ask about specific tables",
+					"error":        "Column not found in generated query",
+					"suggestion":   "Try rephrasing your question or ask about specific tables",
 					"original_sql": sql,
 				},
 			}
@@ -557,22 +557,22 @@ func (s *Server) handleAsk(ctx context.Context, req *mcp.CallToolRequest, in ask
 				Note: note + " (query failed - column not found)",
 			}, nil
 		}
-		
+
 		auditLog("ask_query_failed", clientIP, sql, err.Error(), false)
 		log.Debug().Str("tool", "ask").Err(err).Dur("dur", time.Since(start)).Msg("query failed")
 		return nil, askOutput{SQL: sql}, err
 	}
-	
+
 	// Flatten all pages into single result
 	var allRows []map[string]any
 	for _, page := range pages {
 		allRows = append(allRows, page.Rows...)
 	}
-	
+
 	auditLog("ask_success", clientIP, in.Query, fmt.Sprintf("streamed %d rows across %d pages", totalRows, len(pages)), true)
 	log.Debug().Str("tool", "ask").Int("total_rows", totalRows).Int("pages", len(pages)).
 		Int("returned_rows", len(allRows)).Dur("dur", time.Since(start)).Msg("done")
-	
+
 	return nil, askOutput{
 		SQL:  sql,
 		Rows: allRows,
@@ -593,7 +593,7 @@ type searchOutput struct {
 func (s *Server) handleSearch(ctx context.Context, req *mcp.CallToolRequest, in searchInput) (*mcp.CallToolResult, searchOutput, error) {
 	start := time.Now()
 	clientIP := "unknown" // MCP doesn't expose client IP directly
-	
+
 	log.Debug().Str("tool", "search").Str("q", strings.TrimSpace(in.Q)).Int("limit", in.Limit).Str("client_ip", clientIP).Msg("request")
 
 	// Input sanitization and validation
@@ -625,7 +625,7 @@ func (s *Server) handleSearch(ctx context.Context, req *mcp.CallToolRequest, in 
 func (s *Server) handleStream(ctx context.Context, req *mcp.CallToolRequest, in streamInput) (*mcp.CallToolResult, streamOutput, error) {
 	start := time.Now()
 	clientIP := "unknown"
-	
+
 	log.Debug().Str("tool", "stream").Str("query", strings.TrimSpace(in.Query)).
 		Int("max_pages", in.MaxPages).Int("page_size", in.PageSize).Str("client_ip", clientIP).Msg("request")
 
@@ -635,24 +635,24 @@ func (s *Server) handleStream(ctx context.Context, req *mcp.CallToolRequest, in 
 		log.Debug().Str("tool", "stream").Err(err).Msg("input validation failed")
 		return nil, streamOutput{}, err
 	}
-	
+
 	schemaTxt, err := s.cache.Get(ctx, s.db)
 	if err != nil {
 		log.Debug().Str("tool", "stream").Err(err).Msg("schema load failed")
 		return nil, streamOutput{}, err
 	}
-	
+
 	// Parameters
 	maxPages := minNonZero(in.MaxPages, maxPagesAuto)
 	pageSize := minNonZero(in.PageSize, pageSize)
-	
+
 	sql, note, err := s.generateSQL(ctx, in.Query, schemaTxt, pageSize*maxPages)
 	if err != nil {
 		auditLog("stream_sql_generation_failed", clientIP, in.Query, err.Error(), false)
 		log.Debug().Str("tool", "stream").Err(err).Msg("sql generation failed")
 		return nil, streamOutput{}, err
 	}
-	
+
 	if err := guardReadOnly(sql); err != nil {
 		auditLog("stream_guard_failed", clientIP, sql, err.Error(), false)
 		log.Debug().Str("tool", "stream").Err(err).Msg("guard failed")
@@ -666,13 +666,13 @@ func (s *Server) handleStream(ctx context.Context, req *mcp.CallToolRequest, in 
 		log.Debug().Str("tool", "stream").Err(err).Dur("dur", time.Since(start)).Msg("query failed")
 		return nil, streamOutput{SQL: sql}, err
 	}
-	
+
 	totalPages := (totalRows + pageSize - 1) / pageSize // Ceiling division
-	
+
 	auditLog("stream_success", clientIP, in.Query, fmt.Sprintf("returned %d rows in %d pages", totalRows, len(pages)), true)
 	log.Debug().Str("tool", "stream").Int("total_rows", totalRows).Int("pages", len(pages)).
 		Dur("dur", time.Since(start)).Msg("done")
-	
+
 	return nil, streamOutput{
 		SQL:        sql,
 		Pages:      pages,
@@ -756,10 +756,10 @@ type PaginatedResult struct {
 func (s *Server) runPaginatedQuery(ctx context.Context, sql string, page, pageSize int) (*PaginatedResult, error) {
 	// First, get total count
 	countSQL := fmt.Sprintf("WITH query AS (%s) SELECT COUNT(*) FROM query", sql)
-	
+
 	ctxTO, cancel := context.WithTimeout(ctx, s.cfg.QueryTO)
 	defer cancel()
-	
+
 	conn, err := s.db.Acquire(ctxTO)
 	if err != nil {
 		return nil, err
@@ -780,7 +780,7 @@ func (s *Server) runPaginatedQuery(ctx context.Context, sql string, page, pageSi
 	// Get paginated data
 	offset := page * pageSize
 	paginatedSQL := fmt.Sprintf("WITH query AS (%s) SELECT * FROM query LIMIT %d OFFSET %d", sql, pageSize, offset)
-	
+
 	rows, err := tx.Query(ctxTO, paginatedSQL)
 	if err != nil {
 		return nil, err
@@ -800,11 +800,11 @@ func (s *Server) runPaginatedQuery(ctx context.Context, sql string, page, pageSi
 		}
 		out = append(out, row)
 	}
-	
+
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	
+
 	if err := tx.Commit(ctxTO); err != nil {
 		return nil, err
 	}
@@ -828,10 +828,10 @@ func (s *Server) runPaginatedQuery(ctx context.Context, sql string, page, pageSi
 func (s *Server) runStreamingQuery(ctx context.Context, sql string, maxPages, pageSize int) ([]streamPageOutput, int, error) {
 	// First, get total count
 	countSQL := fmt.Sprintf("WITH query AS (%s) SELECT COUNT(*) FROM query", sql)
-	
+
 	ctxTO, cancel := context.WithTimeout(ctx, s.cfg.QueryTO*time.Duration(maxPages))
 	defer cancel()
-	
+
 	conn, err := s.db.Acquire(ctxTO)
 	if err != nil {
 		return nil, 0, err
@@ -852,14 +852,14 @@ func (s *Server) runStreamingQuery(ctx context.Context, sql string, maxPages, pa
 	// Calculate actual pages to fetch
 	totalPages := (totalCount + pageSize - 1) / pageSize
 	pagesToFetch := minNonZero(maxPages, totalPages)
-	
+
 	var pages []streamPageOutput
-	
+
 	// Fetch pages
 	for page := 0; page < pagesToFetch; page++ {
 		offset := page * pageSize
 		paginatedSQL := fmt.Sprintf("WITH query AS (%s) SELECT * FROM query LIMIT %d OFFSET %d", sql, pageSize, offset)
-		
+
 		rows, err := tx.Query(ctxTO, paginatedSQL)
 		if err != nil {
 			return nil, 0, err
@@ -880,22 +880,22 @@ func (s *Server) runStreamingQuery(ctx context.Context, sql string, maxPages, pa
 			pageRows = append(pageRows, row)
 		}
 		rows.Close()
-		
+
 		if err := rows.Err(); err != nil {
 			return nil, 0, err
 		}
-		
+
 		pages = append(pages, streamPageOutput{
 			Page: page,
 			Rows: pageRows,
 		})
-		
+
 		// Stop if no more rows
 		if len(pageRows) < pageSize {
 			break
 		}
 	}
-	
+
 	if err := tx.Commit(ctxTO); err != nil {
 		return nil, 0, err
 	}
@@ -1097,7 +1097,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { 
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -1132,7 +1132,7 @@ func main() {
 
 	log.Info().Str("addr", addr).Str("path", path).Msg("starting MCP server on HTTP SSE")
 	auditLog("server_start", "system", "", addr, true)
-	
+
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal().Err(err).Msg("server error")
 	}

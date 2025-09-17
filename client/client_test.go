@@ -35,11 +35,11 @@ func TestFormatValue(t *testing.T) {
 
 func TestGetenv(t *testing.T) {
 	tests := []struct {
-		name    string
-		key     string
-		def     string
-		setVal  string
-		want    string
+		name   string
+		key    string
+		def    string
+		setVal string
+		want   string
 	}{
 		{
 			name:   "existing_env_var",
@@ -70,7 +70,7 @@ func TestGetenv(t *testing.T) {
 			if tt.setVal != "" {
 				t.Setenv(tt.key, tt.setVal)
 			}
-			
+
 			got := getenv(tt.key, tt.def)
 			if got != tt.want {
 				t.Fatalf("getenv(%q, %q) = %q, want %q", tt.key, tt.def, got, tt.want)
@@ -131,7 +131,7 @@ func TestPrintTableStructure(t *testing.T) {
 					t.Fatalf("printTable panicked: %v", r)
 				}
 			}()
-			
+
 			// Capture output (we're just testing it doesn't crash)
 			printTable(tc.rows)
 		})
@@ -178,7 +178,7 @@ text`},
 					t.Fatalf("printCSV panicked: %v", r)
 				}
 			}()
-			
+
 			printCSV(tc.rows)
 		})
 	}
@@ -213,7 +213,7 @@ func TestAsksFlag(t *testing.T) {
 			for _, v := range tt.values {
 				flag.Set(v)
 			}
-			
+
 			got := flag.String()
 			if got != tt.want {
 				t.Fatalf("asksFlag.String() = %q, want %q", got, tt.want)
@@ -265,7 +265,7 @@ func TestPrintFormattedResultStructure(t *testing.T) {
 					t.Fatalf("printFormattedResult panicked: %v", r)
 				}
 			}()
-			
+
 			printFormattedResult(tc.result, tc.format, true)
 		})
 	}
@@ -277,19 +277,19 @@ func TestAuthRoundTripper(t *testing.T) {
 		base:   http.DefaultTransport,
 		bearer: "test-token",
 	}
-	
+
 	// Create a real HTTP request
 	req, err := http.NewRequest("GET", "http://example.com", nil)
 	if err != nil {
 		t.Fatalf("NewRequest failed: %v", err)
 	}
-	
+
 	// Clone and modify (this tests our RoundTrip logic without making actual HTTP calls)
 	cloned := req.Clone(req.Context())
 	if rt.bearer != "" {
 		cloned.Header.Set("Authorization", "Bearer "+rt.bearer)
 	}
-	
+
 	// Check that Authorization header was set
 	if auth := cloned.Header.Get("Authorization"); auth != "Bearer test-token" {
 		t.Fatalf("expected Authorization header 'Bearer test-token', got %q", auth)

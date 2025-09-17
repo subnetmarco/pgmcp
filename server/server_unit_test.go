@@ -175,11 +175,11 @@ func TestSanitizeInput(t *testing.T) {
 
 func TestPaginatedResult(t *testing.T) {
 	tests := []struct {
-		name        string
-		totalCount  int
-		page        int
-		pageSize    int
-		wantHasMore bool
+		name         string
+		totalCount   int
+		page         int
+		pageSize     int
+		wantHasMore  bool
 		wantNextPage int
 	}{
 		{
@@ -243,7 +243,7 @@ func TestPaginatedResult(t *testing.T) {
 			if rowsOnPage < 0 {
 				rowsOnPage = 0
 			}
-			
+
 			hasMore := offset+rowsOnPage < tt.totalCount
 			nextPage := tt.page + 1
 			if !hasMore {
@@ -251,7 +251,7 @@ func TestPaginatedResult(t *testing.T) {
 			}
 
 			if hasMore != tt.wantHasMore {
-				t.Fatalf("hasMore = %v, want %v (totalCount=%d, page=%d, pageSize=%d)", 
+				t.Fatalf("hasMore = %v, want %v (totalCount=%d, page=%d, pageSize=%d)",
 					hasMore, tt.wantHasMore, tt.totalCount, tt.page, tt.pageSize)
 			}
 			if nextPage != tt.wantNextPage {
@@ -319,7 +319,7 @@ func TestStreamingPaginationCalculations(t *testing.T) {
 			if tt.totalCount == 0 {
 				totalPages = 0
 			}
-			
+
 			if totalPages != tt.wantTotalPages {
 				t.Fatalf("totalPages = %d, want %d", totalPages, tt.wantTotalPages)
 			}
@@ -329,7 +329,7 @@ func TestStreamingPaginationCalculations(t *testing.T) {
 			if tt.totalCount == 0 {
 				fetchPages = 0
 			}
-			
+
 			if fetchPages != tt.wantFetchPages {
 				t.Fatalf("fetchPages = %d, want %d", fetchPages, tt.wantFetchPages)
 			}
@@ -387,9 +387,9 @@ func TestIsExpensiveQuery(t *testing.T) {
 
 func TestSimplifyExpensiveQuery(t *testing.T) {
 	tests := []struct {
-		name          string
-		sql           string
-		originalQuery string
+		name           string
+		sql            string
+		originalQuery  string
 		wantSimplified bool
 	}{
 		{
@@ -416,12 +416,12 @@ func TestSimplifyExpensiveQuery(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := simplifyExpensiveQuery(tt.sql, tt.originalQuery)
 			simplified := result != tt.sql
-			
+
 			if simplified != tt.wantSimplified {
-				t.Fatalf("simplifyExpensiveQuery simplified=%v, want %v\nOriginal: %s\nResult: %s", 
+				t.Fatalf("simplifyExpensiveQuery simplified=%v, want %v\nOriginal: %s\nResult: %s",
 					simplified, tt.wantSimplified, tt.sql, result)
 			}
-			
+
 			if simplified && !strings.Contains(result, "Query too complex") {
 				t.Fatalf("Expected simplified query to contain error message, got: %s", result)
 			}
@@ -506,7 +506,7 @@ func TestErrorHandlingMessages(t *testing.T) {
 			wantSuggest: "Try rephrasing your question or ask about specific tables",
 		},
 		{
-			name:        "table does not exist", 
+			name:        "table does not exist",
 			dbError:     `ERROR: relation "nonexistent_table" does not exist (SQLSTATE 42P01)`,
 			wantMessage: "Table not found",
 			wantSuggest: "Check available tables",
@@ -523,11 +523,11 @@ func TestErrorHandlingMessages(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test that our error detection logic works
 			isColumnError := strings.Contains(tt.dbError, "column") && strings.Contains(tt.dbError, "does not exist")
-			
+
 			if tt.name == "column does not exist" && !isColumnError {
 				t.Fatalf("Failed to detect column error in: %s", tt.dbError)
 			}
-			
+
 			if tt.name != "column does not exist" && isColumnError {
 				t.Fatalf("Incorrectly detected column error in: %s", tt.dbError)
 			}
@@ -537,22 +537,22 @@ func TestErrorHandlingMessages(t *testing.T) {
 
 func TestSchemaCache(t *testing.T) {
 	cache := &SchemaCache{}
-	
+
 	// Test empty cache
 	if cache.txt != "" {
 		t.Fatalf("Expected empty cache, got: %s", cache.txt)
 	}
-	
+
 	// Test cache expiration
 	cache.txt = "test schema"
 	cache.expiresAt = time.Now().Add(-1 * time.Hour) // expired
-	
+
 	// Since we can't easily test the full Get method without a DB,
 	// we'll test the expiration logic
 	if time.Now().Before(cache.expiresAt) {
 		t.Fatalf("Expected cache to be expired")
 	}
-	
+
 	// Test future expiration
 	cache.expiresAt = time.Now().Add(1 * time.Hour)
 	if !time.Now().Before(cache.expiresAt) {

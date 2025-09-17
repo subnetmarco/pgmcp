@@ -29,6 +29,14 @@ jobs:
           go-version: "1.23"
       - name: Go tidy
         run: go mod tidy
+      - name: Build Server
+        run: go build -o pgmcp-server ./server
+      - name: Build Client  
+        run: go build -o pgmcp-client ./client
+      - name: Lint
+        run: |
+          go vet ./...
+          test -z "$(gofmt -s -l . | grep -v vendor/)"
       - name: Unit Tests
         run: go test ./server -run "TestMinNonZero|TestGuardReadOnly|TestConfigValidate|TestSanitizeInput|TestPaginatedResult|TestStreamingPaginationCalculations|TestIsExpensiveQuery|TestSimplifyExpensiveQuery" -v
       - name: Security Tests

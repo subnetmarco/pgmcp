@@ -17,7 +17,7 @@ import (
 
 func TestComprehensiveStreaming(t *testing.T) {
 	t.Parallel()
-	
+
 	// Setup test database
 	db := mustPool(t)
 	defer db.Close()
@@ -37,7 +37,7 @@ func TestComprehensiveStreaming(t *testing.T) {
 		QueryTO:     30 * time.Second,
 		MaxRows:     50,
 	}
-	
+
 	ctx := context.Background()
 	srv, err := newServer(ctx, cfg)
 	if err != nil {
@@ -50,15 +50,15 @@ func TestComprehensiveStreaming(t *testing.T) {
 		if err != nil {
 			t.Fatalf("runStreamingQuery: %v", err)
 		}
-		
+
 		if len(pages) != 5 {
 			t.Fatalf("expected 5 pages, got %d", len(pages))
 		}
-		
+
 		if totalCount != 100 {
 			t.Fatalf("expected 100 total records, got %d", totalCount)
 		}
-		
+
 		// Verify page structure
 		for i, page := range pages {
 			if page.Page != i {
@@ -73,11 +73,11 @@ func TestComprehensiveStreaming(t *testing.T) {
 	t.Run("pagination_edge_cases", func(t *testing.T) {
 		// Test pagination with edge cases
 		testCases := []struct {
-			name           string
-			sql            string
-			page           int
-			pageSize       int
-			expectedRows   int
+			name            string
+			sql             string
+			page            int
+			pageSize        int
+			expectedRows    int
 			expectedHasMore bool
 		}{
 			{
@@ -120,11 +120,11 @@ func TestComprehensiveStreaming(t *testing.T) {
 				if err != nil {
 					t.Fatalf("runPaginatedQuery: %v", err)
 				}
-				
+
 				if len(result.Rows) != tc.expectedRows {
 					t.Fatalf("expected %d rows, got %d", tc.expectedRows, len(result.Rows))
 				}
-				
+
 				if result.HasMore != tc.expectedHasMore {
 					t.Fatalf("expected hasMore %v, got %v", tc.expectedHasMore, result.HasMore)
 				}
@@ -165,7 +165,7 @@ func TestComprehensiveStreaming(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				_, _, err := srv.handleAsk(ctx, nil, tc.input)
 				hasErr := err != nil
-				
+
 				if hasErr != tc.wantErr {
 					t.Fatalf("handleAsk error = %v, wantErr %v", err, tc.wantErr)
 				}
@@ -186,12 +186,12 @@ func TestComprehensiveStreaming(t *testing.T) {
 				if !isExpensiveQuery(sql) {
 					t.Fatalf("expected query to be detected as expensive: %s", sql)
 				}
-				
+
 				simplified := simplifyExpensiveQuery(sql, "test query")
 				if simplified == sql {
 					t.Fatalf("expected query to be simplified, but it wasn't: %s", sql)
 				}
-				
+
 				if !strings.Contains(simplified, "Query too complex") {
 					t.Fatalf("expected simplified query to contain error message, got: %s", simplified)
 				}
@@ -305,19 +305,30 @@ func TestAuditLogging(t *testing.T) {
 
 func setupComprehensiveTestData(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
-	
+
 	ctx := context.Background()
-	
+
+	// Clean up any existing test tables first
+	cleanup := `
+		DROP TABLE IF EXISTS test_items CASCADE;
+		DROP TABLE IF EXISTS test_orders CASCADE;
+		DROP TABLE IF EXISTS test_users CASCADE;
+	`
+	_, err := db.Exec(ctx, cleanup)
+	if err != nil {
+		t.Fatalf("cleanup test tables: %v", err)
+	}
+
 	// Create test tables
 	schema := `
-		CREATE TABLE IF NOT EXISTS test_users (
+		CREATE TABLE test_users (
 			id SERIAL PRIMARY KEY,
 			name TEXT NOT NULL,
 			email TEXT UNIQUE NOT NULL,
 			created_at TIMESTAMPTZ DEFAULT now()
 		);
 		
-		CREATE TABLE IF NOT EXISTS test_orders (
+		CREATE TABLE test_orders (
 			id SERIAL PRIMARY KEY,
 			user_id INT REFERENCES test_users(id),
 			total_cents INT NOT NULL,
@@ -325,35 +336,36 @@ func setupComprehensiveTestData(t *testing.T, db *pgxpool.Pool) {
 			created_at TIMESTAMPTZ DEFAULT now()
 		);
 		
-		CREATE TABLE IF NOT EXISTS test_items (
+		CREATE TABLE test_items (
 			id SERIAL PRIMARY KEY,
 			order_id INT REFERENCES test_orders(id),
 			name TEXT NOT NULL,
-			price_cents INT NOT NULL
+			price_cents INT NOT NULL,
+			created_at TIMESTAMPTZ DEFAULT now()
 		);
 	`
-	
-	_, err := db.Exec(ctx, schema)
+
+	_, err = db.Exec(ctx, schema)
 	if err != nil {
 		t.Fatalf("create test schema: %v", err)
 	}
-	
+
 	// Clear existing data
 	_, err = db.Exec(ctx, "TRUNCATE test_users, test_orders, test_items CASCADE")
 	if err != nil {
 		t.Fatalf("truncate test tables: %v", err)
 	}
-	
+
 	// Insert test data
 	for i := 1; i <= 100; i++ {
-		_, err = db.Exec(ctx, 
-			"INSERT INTO test_users (name, email) VALUES ($1, $2)", 
+		_, err = db.Exec(ctx,
+			"INSERT INTO test_users (name, email) VALUES ($1, $2)",
 			"User "+intToString(i), "user"+intToString(i)+"@test.com")
 		if err != nil {
 			t.Fatalf("insert test user %d: %v", i, err)
 		}
 	}
-	
+
 	// Insert orders (some users have multiple orders)
 	for i := 1; i <= 50; i++ {
 		userID := 1 + (i-1)%25 // First 25 users get orders
@@ -364,7 +376,7 @@ func setupComprehensiveTestData(t *testing.T, db *pgxpool.Pool) {
 			t.Fatalf("insert test order %d: %v", i, err)
 		}
 	}
-	
+
 	// Insert items
 	for i := 1; i <= 100; i++ {
 		orderID := 1 + (i-1)%50 // Each order gets 2 items on average
@@ -383,12 +395,12 @@ func mockOpenAIComprehensive(t *testing.T) *httptest.Server {
 			http.NotFound(w, r)
 			return
 		}
-		
+
 		// Parse request to determine query type
 		body := make([]byte, r.ContentLength)
 		r.Body.Read(body)
 		bodyStr := strings.ToLower(string(body))
-		
+
 		var sql string
 		switch {
 		case strings.Contains(bodyStr, "all users"):
@@ -402,7 +414,7 @@ func mockOpenAIComprehensive(t *testing.T) *httptest.Server {
 		default:
 			sql = "SELECT id, name FROM test_users ORDER BY id LIMIT 10"
 		}
-		
+
 		resp := map[string]any{
 			"id":      "chatcmpl-test",
 			"object":  "chat.completion",
@@ -426,15 +438,15 @@ func mockOpenAIComprehensive(t *testing.T) *httptest.Server {
 
 func TestMCPHandlerIntegration(t *testing.T) {
 	t.Parallel()
-	
+
 	// Setup
 	db := mustPool(t)
 	defer db.Close()
 	setupComprehensiveTestData(t, db)
-	
+
 	llm := mockOpenAIComprehensive(t)
 	defer llm.Close()
-	
+
 	cfg := Config{
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		OpenAIKey:   "test-key",
@@ -444,7 +456,7 @@ func TestMCPHandlerIntegration(t *testing.T) {
 		QueryTO:     10 * time.Second,
 		MaxRows:     50,
 	}
-	
+
 	ctx := context.Background()
 	srv, err := newServer(ctx, cfg)
 	if err != nil {
@@ -459,11 +471,11 @@ func TestMCPHandlerIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handleAsk: %v", err)
 		}
-		
+
 		if len(output.Rows) == 0 {
 			t.Fatalf("expected results, got none")
 		}
-		
+
 		if !strings.Contains(output.Note, "streamed") {
 			t.Fatalf("expected note to mention streaming, got: %s", output.Note)
 		}
@@ -477,7 +489,7 @@ func TestMCPHandlerIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handleSearch: %v", err)
 		}
-		
+
 		if len(output.Rows) == 0 {
 			t.Fatalf("expected search results, got none")
 		}
@@ -492,11 +504,11 @@ func TestMCPHandlerIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("handleStream: %v", err)
 		}
-		
+
 		if len(output.Pages) == 0 {
 			t.Fatalf("expected pages, got none")
 		}
-		
+
 		if output.TotalRows == 0 {
 			t.Fatalf("expected total rows > 0, got %d", output.TotalRows)
 		}
@@ -508,21 +520,21 @@ func BenchmarkQueryPerformance(b *testing.B) {
 	db := mustPoolForBench(b)
 	defer db.Close()
 	createLargeTestDataForBench(b, db, 10000) // 10k records
-	
+
 	cfg := Config{
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		QueryTO:     30 * time.Second,
 		MaxRows:     50,
 	}
-	
+
 	ctx := context.Background()
 	srv, err := newServer(ctx, cfg)
 	if err != nil {
 		b.Fatalf("newServer: %v", err)
 	}
-	
+
 	b.ResetTimer()
-	
+
 	b.Run("simple_query", func(b *testing.B) {
 		sql := "SELECT id, name FROM large_test_table ORDER BY id"
 		for i := 0; i < b.N; i++ {
@@ -532,7 +544,7 @@ func BenchmarkQueryPerformance(b *testing.B) {
 			}
 		}
 	})
-	
+
 	b.Run("pagination", func(b *testing.B) {
 		sql := "SELECT id, name FROM large_test_table ORDER BY id"
 		for i := 0; i < b.N; i++ {
@@ -542,7 +554,7 @@ func BenchmarkQueryPerformance(b *testing.B) {
 			}
 		}
 	})
-	
+
 	b.Run("streaming_3_pages", func(b *testing.B) {
 		sql := "SELECT id, name FROM large_test_table ORDER BY id"
 		for i := 0; i < b.N; i++ {
@@ -556,9 +568,9 @@ func BenchmarkQueryPerformance(b *testing.B) {
 
 func createLargeTestDataForBench(tb testing.TB, db *pgxpool.Pool, count int) {
 	tb.Helper()
-	
+
 	ctx := context.Background()
-	
+
 	// Create test table
 	_, err := db.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS large_test_table (
@@ -571,13 +583,13 @@ func createLargeTestDataForBench(tb testing.TB, db *pgxpool.Pool, count int) {
 	if err != nil {
 		tb.Fatalf("create large test table: %v", err)
 	}
-	
+
 	// Clear existing data
 	_, err = db.Exec(ctx, "TRUNCATE large_test_table")
 	if err != nil {
 		tb.Fatalf("truncate large test table: %v", err)
 	}
-	
+
 	// Insert test records in batches
 	batchSize := 1000
 	for i := 0; i < count; i += batchSize {
@@ -585,19 +597,19 @@ func createLargeTestDataForBench(tb testing.TB, db *pgxpool.Pool, count int) {
 		if end > count {
 			end = count
 		}
-		
+
 		var values []any
 		var placeholders []string
 		idx := 1
-		
+
 		for j := i; j < end; j++ {
 			placeholders = append(placeholders, "($"+intToString(idx)+", $"+intToString(idx+1)+")")
 			values = append(values, "Record "+intToString(j+1), (j+1)*10)
 			idx += 2
 		}
-		
+
 		sql := "INSERT INTO large_test_table (name, value) VALUES " + strings.Join(placeholders, ", ")
-		
+
 		_, err = db.Exec(ctx, sql, values...)
 		if err != nil {
 			tb.Fatalf("insert batch %d-%d: %v", i, end, err)
@@ -626,7 +638,7 @@ func mustPoolForBench(b *testing.B) *pgxpool.Pool {
 
 func TestErrorHandlingIntegration(t *testing.T) {
 	t.Parallel()
-	
+
 	// Setup test database
 	db := mustPool(t)
 	defer db.Close()
@@ -635,18 +647,18 @@ func TestErrorHandlingIntegration(t *testing.T) {
 	// Setup mock OpenAI that returns bad SQL
 	badSQLResponses := map[string]string{
 		"user that purchased most items": `SELECT user_id, COUNT(*) FROM order_items GROUP BY user_id ORDER BY COUNT(*) DESC LIMIT 1`, // user_id doesn't exist in order_items
-		"show me tables": `SELECT * FROM nonexistent_table LIMIT 10`, // table doesn't exist
-		"count all users": `SELEC COUNT(*) FROM users`, // syntax error
+		"show me tables":                 `SELECT * FROM nonexistent_table LIMIT 10`,                                                  // table doesn't exist
+		"count all users":                `SELEC COUNT(*) FROM users`,                                                                 // syntax error
 	}
-	
+
 	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req map[string]interface{}
 		json.NewDecoder(r.Body).Decode(&req)
-		
+
 		messages := req["messages"].([]interface{})
 		userMsg := messages[len(messages)-1].(map[string]interface{})
 		question := strings.ToLower(userMsg["content"].(string))
-		
+
 		var sqlResponse string
 		for key, sql := range badSQLResponses {
 			if strings.Contains(question, key) {
@@ -654,11 +666,11 @@ func TestErrorHandlingIntegration(t *testing.T) {
 				break
 			}
 		}
-		
+
 		if sqlResponse == "" {
 			sqlResponse = "SELECT 1 as result LIMIT 1" // fallback
 		}
-		
+
 		resp := map[string]interface{}{
 			"choices": []map[string]interface{}{
 				{"message": map[string]interface{}{"content": sqlResponse}},
@@ -689,45 +701,45 @@ func TestErrorHandlingIntegration(t *testing.T) {
 		_, result, err := srv.handleAsk(context.Background(), nil, askInput{
 			Query: "Give me the user that purchased most items",
 		})
-		
+
 		if err != nil {
 			t.Fatalf("Expected graceful error handling, got error: %v", err)
 		}
-		
+
 		// Should return error information in rows
 		if len(result.Rows) == 0 {
 			t.Fatalf("Expected error information in rows, got empty result")
 		}
-		
+
 		errorRow := result.Rows[0]
 		if errorRow["error"] == nil {
 			t.Fatalf("Expected error field in response, got: %+v", errorRow)
 		}
-		
+
 		if errorRow["suggestion"] == nil {
 			t.Fatalf("Expected suggestion field in response, got: %+v", errorRow)
 		}
-		
+
 		if errorRow["original_sql"] == nil {
 			t.Fatalf("Expected original_sql field in response, got: %+v", errorRow)
 		}
-		
+
 		// Check that note indicates the error
 		if !strings.Contains(result.Note, "query failed") {
 			t.Fatalf("Expected note to indicate query failed, got: %s", result.Note)
 		}
 	})
 
-	// Test table error handling  
+	// Test table error handling
 	t.Run("table_does_not_exist", func(t *testing.T) {
 		_, result, err := srv.handleAsk(context.Background(), nil, askInput{
 			Query: "show me tables",
 		})
-		
+
 		if err != nil {
 			t.Fatalf("Expected graceful error handling, got error: %v", err)
 		}
-		
+
 		// Should return some kind of error response
 		if len(result.Rows) == 0 {
 			t.Fatalf("Expected some result rows, got empty")
@@ -739,11 +751,11 @@ func TestErrorHandlingIntegration(t *testing.T) {
 		_, result, err := srv.handleAsk(context.Background(), nil, askInput{
 			Query: "count all users",
 		})
-		
+
 		if err != nil {
 			t.Fatalf("Expected graceful error handling, got error: %v", err)
 		}
-		
+
 		// Should return some kind of error response
 		if len(result.Rows) == 0 {
 			t.Fatalf("Expected some result rows, got empty")
@@ -753,7 +765,7 @@ func TestErrorHandlingIntegration(t *testing.T) {
 
 func TestSchemaLoadingIntegration(t *testing.T) {
 	t.Parallel()
-	
+
 	db := mustPool(t)
 	defer db.Close()
 	setupComprehensiveTestData(t, db)
@@ -763,46 +775,46 @@ func TestSchemaLoadingIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to load schema: %v", err)
 	}
-	
+
 	if schema == "" {
 		t.Fatalf("Expected non-empty schema")
 	}
-	
+
 	// Check that schema contains expected elements
 	if !strings.Contains(schema, "TABLE") {
 		t.Fatalf("Expected schema to contain TABLE definitions, got: %s", schema)
 	}
-	
+
 	if !strings.Contains(schema, "FK") {
 		t.Fatalf("Expected schema to contain FK (foreign key) definitions, got: %s", schema)
 	}
-	
+
 	// Test schema caching
 	cache := &SchemaCache{}
-	
+
 	// First call should load from DB
 	schema1, err := cache.Get(context.Background(), db)
 	if err != nil {
 		t.Fatalf("Failed to get schema from cache: %v", err)
 	}
-	
+
 	// Second call should use cache
 	schema2, err := cache.Get(context.Background(), db)
 	if err != nil {
 		t.Fatalf("Failed to get schema from cache: %v", err)
 	}
-	
+
 	if schema1 != schema2 {
 		t.Fatalf("Expected cached schema to match, got different results")
 	}
-	
+
 	// Test cache expiration
 	cache.expiresAt = time.Now().Add(-1 * time.Hour) // force expiration
 	schema3, err := cache.Get(context.Background(), db)
 	if err != nil {
 		t.Fatalf("Failed to refresh expired cache: %v", err)
 	}
-	
+
 	if schema3 == "" {
 		t.Fatalf("Expected refreshed schema to be non-empty")
 	}

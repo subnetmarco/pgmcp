@@ -8,9 +8,9 @@ import (
 
 func TestSanitizeInputComprehensive(t *testing.T) {
 	tests := []struct {
-		name    string
-		input   string
-		wantErr bool
+		name     string
+		input    string
+		wantErr  bool
 		wantWarn bool // Should trigger warning log
 	}{
 		// Valid inputs
@@ -29,7 +29,7 @@ func TestSanitizeInputComprehensive(t *testing.T) {
 			input:   "Find orders over $100",
 			wantErr: false,
 		},
-		
+
 		// Invalid inputs
 		{
 			name:    "empty_string",
@@ -46,7 +46,7 @@ func TestSanitizeInputComprehensive(t *testing.T) {
 			input:   strings.Repeat("SELECT * FROM table ", 1000), // > maxQueryLength
 			wantErr: true,
 		},
-		
+
 		// Suspicious patterns (warn but don't reject)
 		{
 			name:     "sql_comment",
@@ -84,11 +84,11 @@ func TestSanitizeInputComprehensive(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := sanitizeInput(tt.input)
 			hasErr := err != nil
-			
+
 			if hasErr != tt.wantErr {
 				t.Fatalf("sanitizeInput(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
 			}
-			
+
 			// Note: We can't easily test warning logs in unit tests without capturing log output
 			// In a real implementation, you might use a test logger
 		})
@@ -122,7 +122,7 @@ func TestGuardReadOnlyComprehensive(t *testing.T) {
 			sql:     "-- This is a comment\nSELECT * FROM users",
 			wantErr: false,
 		},
-		
+
 		// Dangerous queries
 		{
 			name:    "insert",
@@ -179,7 +179,7 @@ func TestGuardReadOnlyComprehensive(t *testing.T) {
 			sql:     "Delete From users Where id = 1",
 			wantErr: true,
 		},
-		
+
 		// Multiple statements
 		{
 			name:    "multiple_statements",
@@ -197,7 +197,7 @@ func TestGuardReadOnlyComprehensive(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := guardReadOnly(tt.sql)
 			hasErr := err != nil
-			
+
 			if hasErr != tt.wantErr {
 				t.Fatalf("guardReadOnly(%q) error = %v, wantErr %v", tt.sql, err, tt.wantErr)
 			}
@@ -308,11 +308,11 @@ func TestConfigValidationEdgeCases(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			err := tt.cfg.Validate()
 			hasErr := err != nil
-			
+
 			if hasErr != tt.wantErr {
 				t.Fatalf("Config.Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			
+
 			if tt.wantErr && tt.errMsg != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.errMsg) {
 					t.Fatalf("expected error to contain %q, got %v", tt.errMsg, err)

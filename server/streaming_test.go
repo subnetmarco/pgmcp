@@ -56,11 +56,11 @@ func TestAskInputPagination(t *testing.T) {
 			if tt.input.MaxRows > 0 {
 				pageSize = minNonZero(tt.input.MaxRows, pageSize)
 			}
-			
+
 			if pageSize != tt.wantSize {
 				t.Fatalf("pageSize = %d, want %d", pageSize, tt.wantSize)
 			}
-			
+
 			if tt.input.Page != tt.wantPage {
 				t.Fatalf("page = %d, want %d", tt.input.Page, tt.wantPage)
 			}
@@ -109,7 +109,7 @@ func TestStreamInputValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			maxPages := minNonZero(tt.input.MaxPages, maxPagesAuto)
 			pageSize := minNonZero(tt.input.PageSize, pageSize)
-			
+
 			if maxPages != tt.wantPages {
 				t.Fatalf("maxPages = %d, want %d", maxPages, tt.wantPages)
 			}
@@ -172,12 +172,12 @@ func TestPaginationSQLGeneration(t *testing.T) {
 					t.Fatalf("countSQL missing '%s': %s", want, countSQL)
 				}
 			}
-			
+
 			// Test paginated SQL generation
 			offset := tt.page * tt.pageSize
-			paginatedSQL := "WITH query AS (" + tt.originalSQL + ") SELECT * FROM query LIMIT " + 
+			paginatedSQL := "WITH query AS (" + tt.originalSQL + ") SELECT * FROM query LIMIT " +
 				intToString(tt.pageSize) + " OFFSET " + intToString(offset)
-			
+
 			for _, want := range tt.wantContains {
 				if !contains(paginatedSQL, want) {
 					t.Fatalf("paginatedSQL missing '%s': %s", want, paginatedSQL)
@@ -195,7 +195,7 @@ func contains(s, substr string) bool {
 	if len(s) < len(substr) {
 		return false
 	}
-	
+
 	for i := 0; i <= len(s)-len(substr); i++ {
 		if s[i:i+len(substr)] == substr {
 			return true
@@ -211,7 +211,7 @@ func intToString(i int) string {
 	if i < 0 {
 		return "-" + intToString(-i)
 	}
-	
+
 	var result string
 	for i > 0 {
 		result = string(rune('0'+i%10)) + result
