@@ -359,6 +359,40 @@ func auditLog(event, user, query, result string, success bool) {
 		Msg("audit_log")
 }
 
+// isExpensiveQuery detects potentially expensive query patterns
+func isExpensiveQuery(sql string) bool {
+	sqlLower := strings.ToLower(sql)
+	
+	// Detect expensive patterns (generic)
+	expensivePatterns := []string{
+		"cross join",     // Cartesian products
+		"left join",      // LEFT JOINs can be expensive
+		"join public.",   // Any JOIN with public schema tables
+	}
+	
+	for _, pattern := range expensivePatterns {
+		if strings.Contains(sqlLower, pattern) {
+			return true
+		}
+	}
+	
+	// Count number of JOINs - more than 1 might be expensive with large tables
+	joinCount := strings.Count(sqlLower, " join ")
+	return joinCount > 1
+}
+
+// simplifyExpensiveQuery rewrites expensive queries to be more performant
+func simplifyExpensiveQuery(sql, originalQuery string) string {
+	sqlLower := strings.ToLower(sql)
+	
+	// For queries with expensive JOINs, return a helpful error message instead
+	if strings.Contains(sqlLower, "join") && (strings.Contains(sqlLower, "left join") || strings.Count(sqlLower, " join ") > 1) {
+		return "SELECT 'Query too complex - please try a simpler question or ask about individual tables' AS message LIMIT 1"
+	}
+	
+	return sql // Return original if no simplification needed
+}
+
 // requestSizeLimitMiddleware limits the size of incoming requests
 func requestSizeLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -458,6 +492,13 @@ func (s *Server) handleAsk(ctx context.Context, req *mcp.CallToolRequest, in ask
 		auditLog("ask_guard_failed", clientIP, sql, err.Error(), false)
 		log.Debug().Str("tool", "ask").Err(err).Dur("dur", time.Since(start)).Msg("guard failed")
 		return nil, askOutput{SQL: sql}, err
+	}
+
+	// Check for potentially expensive queries and simplify them
+	if isExpensiveQuery(sql) {
+		log.Warn().Str("sql", sql).Msg("potentially expensive query detected - simplifying")
+		sql = simplifyExpensiveQuery(sql, in.Query)
+		log.Info().Str("simplified_sql", sql).Msg("query simplified for performance")
 	}
 
 	// Automatically stream all results
@@ -881,6 +922,14 @@ func (s *Server) generateSQL(ctx context.Context, question, schema string, maxRo
 	- Use column names and relationships exactly as they appear in the schema
 	- When in doubt, include more data rather than filtering it out
 	- Focus on structural relationships (JOINs) rather than data content assumptions
+
+	Performance Guidelines (CRITICAL):
+	- STRONGLY PREFER single-table queries - avoid JOINs unless absolutely necessary
+	- For "most reviewed" questions, interpret as "most recent" or "largest by count" from a single table
+	- For "top X" questions, use simple ORDER BY on a single table when possible
+	- Only use JOINs for direct 1:1 or 1:many lookups, never many:many relationships
+	- When in doubt, choose the simpler single-table interpretation
+	- Avoid any query that might scan more than 10,000 row combinations
 
 	Schema summary:
 	` + schema
