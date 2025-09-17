@@ -43,29 +43,29 @@ func TestStreamingLargeDataset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newServer: %v", err)
 	}
-		// Test streaming with large dataset
-		pages, totalCount, err := srv.runStreamingQuery(ctx, "SELECT id, name FROM test_users ORDER BY id", 5, 10)
-		if err != nil {
-			t.Fatalf("runStreamingQuery: %v", err)
-		}
+	// Test streaming with large dataset
+	pages, totalCount, err := srv.runStreamingQuery(ctx, "SELECT id, name FROM test_users ORDER BY id", 5, 10)
+	if err != nil {
+		t.Fatalf("runStreamingQuery: %v", err)
+	}
 
-		if len(pages) != 5 {
-			t.Fatalf("expected 5 pages, got %d", len(pages))
-		}
+	if len(pages) != 5 {
+		t.Fatalf("expected 5 pages, got %d", len(pages))
+	}
 
-		if totalCount != 100 {
-			t.Fatalf("expected 100 total records, got %d", totalCount)
-		}
+	if totalCount != 100 {
+		t.Fatalf("expected 100 total records, got %d", totalCount)
+	}
 
-		// Verify page structure
-		for i, page := range pages {
-			if page.Page != i {
-				t.Fatalf("page %d has wrong page number: %d", i, page.Page)
-			}
-			if len(page.Rows) != 10 {
-				t.Fatalf("page %d has wrong row count: %d, expected 10", i, len(page.Rows))
-			}
+	// Verify page structure
+	for i, page := range pages {
+		if page.Page != i {
+			t.Fatalf("page %d has wrong page number: %d", i, page.Page)
 		}
+		if len(page.Rows) != 10 {
+			t.Fatalf("page %d has wrong row count: %d, expected 10", i, len(page.Rows))
+		}
+	}
 }
 
 func TestPaginationEdgeCases(t *testing.T) {
@@ -186,97 +186,72 @@ func TestSecurityAndValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newServer: %v", err)
 	}
-		// Test input validation
-		testCases := []struct {
-			name    string
-			input   askInput
-			wantErr bool
-		}{
-			{
-				name:    "valid_query",
-				input:   askInput{Query: "SELECT * FROM test_users"},
-				wantErr: false,
-			},
-			{
-				name:    "empty_query",
-				input:   askInput{Query: ""},
-				wantErr: true,
-			},
-			{
-				name:    "whitespace_query",
-				input:   askInput{Query: "   "},
-				wantErr: true,
-			},
-			{
-				name:    "too_long_query",
-				input:   askInput{Query: strings.Repeat("SELECT ", 2000)},
-				wantErr: true,
-			},
-		}
+	// Test input validation
+	testCases := []struct {
+		name    string
+		input   askInput
+		wantErr bool
+	}{
+		{
+			name:    "valid_query",
+			input:   askInput{Query: "SELECT * FROM test_users"},
+			wantErr: false,
+		},
+		{
+			name:    "empty_query",
+			input:   askInput{Query: ""},
+			wantErr: true,
+		},
+		{
+			name:    "whitespace_query",
+			input:   askInput{Query: "   "},
+			wantErr: true,
+		},
+		{
+			name:    "too_long_query",
+			input:   askInput{Query: strings.Repeat("SELECT ", 2000)},
+			wantErr: true,
+		},
+	}
 
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				_, _, err := srv.handleAsk(ctx, nil, tc.input)
-				hasErr := err != nil
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := srv.handleAsk(ctx, nil, tc.input)
+			hasErr := err != nil
 
-				if hasErr != tc.wantErr {
-					t.Fatalf("handleAsk error = %v, wantErr %v", err, tc.wantErr)
-				}
-			})
-		}
+			if hasErr != tc.wantErr {
+				t.Fatalf("handleAsk error = %v, wantErr %v", err, tc.wantErr)
+			}
+		})
+	}
 }
 
 func TestQueryComplexityProtection(t *testing.T) {
 	t.Parallel()
 
-	// Setup test database
-	db := mustPool(t)
-	defer db.Close()
-	setupComprehensiveTestData(t, db)
-
-	// Setup mock OpenAI
-	llm := mockOpenAIComprehensive(t)
-	defer llm.Close()
-
-	// Setup server
-	cfg := Config{
-		DatabaseURL: os.Getenv("DATABASE_URL"),
-		OpenAIKey:   "test-key",
-		OpenAIBase:  llm.URL + "/v1",
-		OpenAIModel: "test-model",
-		SchemaTTL:   2 * time.Minute,
-		QueryTO:     30 * time.Second,
-		MaxRows:     50,
+	// Test that expensive queries are detected and handled
+	expensiveQueries := []string{
+		"SELECT * FROM users u LEFT JOIN orders o ON u.id = o.user_id LEFT JOIN items i ON o.item_id = i.id",
+		"SELECT * FROM users CROSS JOIN orders",
+		"SELECT * FROM users u JOIN orders o ON u.id = o.user_id JOIN items i ON o.item_id = i.id JOIN reviews r ON i.id = r.item_id",
 	}
 
-	ctx := context.Background()
-	srv, err := newServer(ctx, cfg)
-	if err != nil {
-		t.Fatalf("newServer: %v", err)
+	for _, sql := range expensiveQueries {
+		t.Run("expensive_query", func(t *testing.T) {
+			if !isExpensiveQuery(sql) {
+				t.Fatalf("expected query to be detected as expensive: %s", sql)
+			}
+
+			simplified := simplifyExpensiveQuery(sql, "test query")
+			if simplified == sql {
+				t.Fatalf("expected query to be simplified, but it wasn't: %s", sql)
+			}
+
+			if !strings.Contains(simplified, "Query too complex") {
+				t.Fatalf("expected simplified query to contain error message, got: %s", simplified)
+			}
+		})
 	}
-		// Test that expensive queries are detected and handled
-		expensiveQueries := []string{
-			"SELECT * FROM users u LEFT JOIN orders o ON u.id = o.user_id LEFT JOIN items i ON o.item_id = i.id",
-			"SELECT * FROM users CROSS JOIN orders",
-			"SELECT * FROM users u JOIN orders o ON u.id = o.user_id JOIN items i ON o.item_id = i.id JOIN reviews r ON i.id = r.item_id",
-		}
-
-		for _, sql := range expensiveQueries {
-			t.Run("expensive_query", func(t *testing.T) {
-				if !isExpensiveQuery(sql) {
-					t.Fatalf("expected query to be detected as expensive: %s", sql)
-				}
-
-				simplified := simplifyExpensiveQuery(sql, "test query")
-				if simplified == sql {
-					t.Fatalf("expected query to be simplified, but it wasn't: %s", sql)
-				}
-
-				if !strings.Contains(simplified, "Query too complex") {
-					t.Fatalf("expected simplified query to contain error message, got: %s", simplified)
-				}
-			})
-		}
 }
 
 func TestConfigurationValidation(t *testing.T) {

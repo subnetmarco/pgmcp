@@ -385,7 +385,7 @@ func simplifyExpensiveQuery(sql, originalQuery string) string {
 	sqlLower := strings.ToLower(sql)
 
 	// For queries with expensive JOINs, return a helpful error message instead
-	if strings.Contains(sqlLower, "join") && (strings.Contains(sqlLower, "left join") || strings.Count(sqlLower, " join ") > 1) {
+	if strings.Contains(sqlLower, "left join") || strings.Contains(sqlLower, "cross join") || strings.Count(sqlLower, " join ") > 2 {
 		return "SELECT 'Query too complex - please try a simpler question or ask about individual tables' AS message LIMIT 1"
 	}
 
