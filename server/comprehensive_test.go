@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestComprehensiveStreaming(t *testing.T) {
@@ -555,8 +554,8 @@ func BenchmarkQueryPerformance(b *testing.B) {
 	})
 }
 
-func createLargeTestDataForBench(b *testing.B, db *pgxpool.Pool, count int) {
-	b.Helper()
+func createLargeTestDataForBench(tb testing.TB, db *pgxpool.Pool, count int) {
+	tb.Helper()
 	
 	ctx := context.Background()
 	
@@ -570,13 +569,13 @@ func createLargeTestDataForBench(b *testing.B, db *pgxpool.Pool, count int) {
 		)
 	`)
 	if err != nil {
-		b.Fatalf("create large test table: %v", err)
+		tb.Fatalf("create large test table: %v", err)
 	}
 	
 	// Clear existing data
 	_, err = db.Exec(ctx, "TRUNCATE large_test_table")
 	if err != nil {
-		b.Fatalf("truncate large test table: %v", err)
+		tb.Fatalf("truncate large test table: %v", err)
 	}
 	
 	// Insert test records in batches
@@ -601,7 +600,7 @@ func createLargeTestDataForBench(b *testing.B, db *pgxpool.Pool, count int) {
 		
 		_, err = db.Exec(ctx, sql, values...)
 		if err != nil {
-			b.Fatalf("insert batch %d-%d: %v", i, end, err)
+			tb.Fatalf("insert batch %d-%d: %v", i, end, err)
 		}
 	}
 }
@@ -669,21 +668,25 @@ func TestErrorHandlingIntegration(t *testing.T) {
 	}))
 	defer llm.Close()
 
-	cfg := mustConfig()
-	cfg.OpenAIURL = llm.URL
-	cfg.QueryTO = 5 * time.Second
+	cfg := Config{
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+		OpenAIKey:   "test-key",
+		OpenAIBase:  llm.URL + "/v1",
+		OpenAIModel: "gpt-4o-mini",
+		SchemaTTL:   2 * time.Minute,
+		QueryTO:     5 * time.Second,
+		MaxRows:     50,
+	}
 
-	srv := &Server{
-		cfg:   cfg,
-		db:    db,
-		cache: &SchemaCache{},
-		llm:   mockClient(llm.URL),
-		model: "gpt-4o-mini",
+	ctx := context.Background()
+	srv, err := newServer(ctx, cfg)
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
 	}
 
 	// Test column error handling
 	t.Run("column_does_not_exist", func(t *testing.T) {
-		result, err := srv.handleAsk(context.Background(), askInput{
+		_, result, err := srv.handleAsk(context.Background(), nil, askInput{
 			Query: "Give me the user that purchased most items",
 		})
 		
@@ -717,7 +720,7 @@ func TestErrorHandlingIntegration(t *testing.T) {
 
 	// Test table error handling  
 	t.Run("table_does_not_exist", func(t *testing.T) {
-		result, err := srv.handleAsk(context.Background(), askInput{
+		_, result, err := srv.handleAsk(context.Background(), nil, askInput{
 			Query: "show me tables",
 		})
 		
@@ -733,7 +736,7 @@ func TestErrorHandlingIntegration(t *testing.T) {
 
 	// Test syntax error handling
 	t.Run("syntax_error", func(t *testing.T) {
-		result, err := srv.handleAsk(context.Background(), askInput{
+		_, result, err := srv.handleAsk(context.Background(), nil, askInput{
 			Query: "count all users",
 		})
 		

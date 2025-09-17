@@ -11,8 +11,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func BenchmarkConcurrentQueries(b *testing.B) {
@@ -54,7 +52,6 @@ func BenchmarkConcurrentQueries(b *testing.B) {
 	})
 	
 	b.Run("concurrent_queries", func(b *testing.B) {
-		concurrency := 10
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
 				_, _, err := srv.handleAsk(ctx, nil, askInput{
@@ -370,54 +367,3 @@ func mockOpenAIFast(tb testing.TB) *httptest.Server {
 	}))
 }
 
-func createLargeTestDataForBench(tb testing.TB, db *pgxpool.Pool, count int) {
-	tb.Helper()
-	
-	ctx := context.Background()
-	
-	// Create test table
-	_, err := db.Exec(ctx, `
-		CREATE TABLE IF NOT EXISTS large_test_table (
-			id SERIAL PRIMARY KEY,
-			name TEXT NOT NULL,
-			value INT NOT NULL,
-			category TEXT NOT NULL,
-			created_at TIMESTAMPTZ DEFAULT now()
-		)
-	`)
-	if err != nil {
-		tb.Fatalf("create large test table: %v", err)
-	}
-	
-	// Clear existing data
-	_, err = db.Exec(ctx, "TRUNCATE large_test_table")
-	if err != nil {
-		tb.Fatalf("truncate large test table: %v", err)
-	}
-	
-	// Insert test records in batches for performance
-	batchSize := 1000
-	for i := 0; i < count; i += batchSize {
-		end := i + batchSize
-		if end > count {
-			end = count
-		}
-		
-		var values []any
-		var placeholders []string
-		idx := 1
-		
-		for j := i; j < end; j++ {
-			placeholders = append(placeholders, "($"+intToString(idx)+", $"+intToString(idx+1)+", $"+intToString(idx+2)+")")
-			values = append(values, "Record "+intToString(j+1), (j+1)*10, "Category"+intToString((j%5)+1))
-			idx += 3
-		}
-		
-		sql := "INSERT INTO large_test_table (name, value, category) VALUES " + strings.Join(placeholders, ", ")
-		
-		_, err = db.Exec(ctx, sql, values...)
-		if err != nil {
-			tb.Fatalf("insert batch %d-%d: %v", i, end, err)
-		}
-	}
-}
