@@ -909,10 +909,18 @@ func (s *Server) generateSQL(ctx context.Context, question, schema string, maxRo
 
 	Query Scope Rules:
 	- SINGULAR questions ("Who is the...", "What is the...") → LIMIT 1
-	- PLURAL questions ("Who are the...", "What are the...") → LIMIT 10-20
+	- PLURAL questions ("Who are the...", "What are the...") → LIMIT 20
 	- COUNT questions ("How many...") → Return COUNT, no additional LIMIT
 	- LIST questions ("List all...", "Show all...") → LIMIT 50
 	- COMPARISON questions ("Compare X and Y...") → Return just the compared items
+	
+	User Override Rules (when user explicitly wants more results):
+	- "Show ALL [items]" or "List ALL [items]" → Use larger LIMIT (200-500)
+	- "Give me EVERY [item]" → Use larger LIMIT (200-500) 
+	- "Show me EVERYTHING" → Use larger LIMIT (200-500)
+	- "Complete list of [items]" → Use larger LIMIT (200-500)
+	- When user emphasizes ALL/EVERY/COMPLETE → Override normal limits
+	- But still respect the maximum LIMIT constraint provided
 
 	Universal Data Handling:
 	- Work ONLY with tables and columns shown in the schema summary below
