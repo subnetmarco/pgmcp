@@ -617,6 +617,25 @@ func createLargeTestDataForBench(tb testing.TB, db *pgxpool.Pool, count int) {
 	}
 }
 
+func mustPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		dsn = "postgres://postgres:postgres@127.0.0.1:5432/pgmcp_test?sslmode=disable"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		t.Skipf("skip: cannot parse DATABASE_URL: %v", err)
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Skipf("skip: cannot connect to postgres: %v", err)
+	}
+	return pool
+}
+
 func mustPoolForBench(b *testing.B) *pgxpool.Pool {
 	b.Helper()
 	dsn := os.Getenv("DATABASE_URL")

@@ -392,7 +392,6 @@ func simplifyExpensiveQuery(sql, originalQuery string) string {
 	return sql // Return original if no simplification needed
 }
 
-// validateSQLBasic performs basic SQL validation to catch common errors
 func validateSQLBasic(sql string) error {
 	sqlLower := strings.ToLower(sql)
 

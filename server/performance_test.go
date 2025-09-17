@@ -237,13 +237,13 @@ func TestConcurrentSafety(t *testing.T) {
 			// Log errors but don't fail - we expect some database errors in testing
 			t.Logf("concurrent handler error (expected in testing): %v", err)
 		}
-		
+
 		// Only fail if we get too many errors (indicating a systemic issue)
 		if errorCount > 15 { // More than 50% failure rate indicates real problems
 			t.Fatalf("too many concurrent errors: %d/30 operations failed", errorCount)
 		}
-		
-		t.Logf("concurrent safety test completed: %d errors out of 30 operations (%.1f%% success rate)", 
+
+		t.Logf("concurrent safety test completed: %d errors out of 30 operations (%.1f%% success rate)",
 			errorCount, float64(30-errorCount)/30*100)
 	})
 }
