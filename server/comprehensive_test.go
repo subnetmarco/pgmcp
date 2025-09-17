@@ -15,7 +15,60 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestComprehensiveStreaming(t *testing.T) {
+func TestStreamingLargeDataset(t *testing.T) {
+	t.Parallel()
+
+	// Setup test database
+	db := mustPool(t)
+	defer db.Close()
+	setupComprehensiveTestData(t, db)
+
+	// Setup mock OpenAI
+	llm := mockOpenAIComprehensive(t)
+	defer llm.Close()
+
+	// Setup server
+	cfg := Config{
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+		OpenAIKey:   "test-key",
+		OpenAIBase:  llm.URL + "/v1",
+		OpenAIModel: "test-model",
+		SchemaTTL:   2 * time.Minute,
+		QueryTO:     30 * time.Second,
+		MaxRows:     50,
+	}
+
+	ctx := context.Background()
+	srv, err := newServer(ctx, cfg)
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
+	}
+		// Test streaming with large dataset
+		pages, totalCount, err := srv.runStreamingQuery(ctx, "SELECT id, name FROM test_users ORDER BY id", 5, 10)
+		if err != nil {
+			t.Fatalf("runStreamingQuery: %v", err)
+		}
+
+		if len(pages) != 5 {
+			t.Fatalf("expected 5 pages, got %d", len(pages))
+		}
+
+		if totalCount != 100 {
+			t.Fatalf("expected 100 total records, got %d", totalCount)
+		}
+
+		// Verify page structure
+		for i, page := range pages {
+			if page.Page != i {
+				t.Fatalf("page %d has wrong page number: %d", i, page.Page)
+			}
+			if len(page.Rows) != 10 {
+				t.Fatalf("page %d has wrong row count: %d, expected 10", i, len(page.Rows))
+			}
+		}
+}
+
+func TestPaginationEdgeCases(t *testing.T) {
 	t.Parallel()
 
 	// Setup test database
@@ -44,95 +97,95 @@ func TestComprehensiveStreaming(t *testing.T) {
 		t.Fatalf("newServer: %v", err)
 	}
 
-	t.Run("streaming_large_dataset", func(t *testing.T) {
-		// Test streaming with large dataset
-		pages, totalCount, err := srv.runStreamingQuery(ctx, "SELECT id, name FROM test_users ORDER BY id", 5, 10)
-		if err != nil {
-			t.Fatalf("runStreamingQuery: %v", err)
-		}
+	// Test pagination with edge cases
+	testCases := []struct {
+		name            string
+		sql             string
+		page            int
+		pageSize        int
+		expectedRows    int
+		expectedHasMore bool
+	}{
+		{
+			name:            "first_page",
+			sql:             "SELECT id FROM test_users ORDER BY id",
+			page:            0,
+			pageSize:        10,
+			expectedRows:    10,
+			expectedHasMore: true,
+		},
+		{
+			name:            "last_page",
+			sql:             "SELECT id FROM test_users ORDER BY id",
+			page:            9,
+			pageSize:        10,
+			expectedRows:    10,
+			expectedHasMore: false,
+		},
+		{
+			name:            "empty_result",
+			sql:             "SELECT id FROM test_users WHERE id > 1000",
+			page:            0,
+			pageSize:        10,
+			expectedRows:    0,
+			expectedHasMore: false,
+		},
+		{
+			name:            "single_result",
+			sql:             "SELECT id FROM test_users WHERE id = 1",
+			page:            0,
+			pageSize:        10,
+			expectedRows:    1,
+			expectedHasMore: false,
+		},
+	}
 
-		if len(pages) != 5 {
-			t.Fatalf("expected 5 pages, got %d", len(pages))
-		}
-
-		if totalCount != 100 {
-			t.Fatalf("expected 100 total records, got %d", totalCount)
-		}
-
-		// Verify page structure
-		for i, page := range pages {
-			if page.Page != i {
-				t.Fatalf("page %d has wrong page number: %d", i, page.Page)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := srv.runPaginatedQuery(ctx, tc.sql, tc.page, tc.pageSize)
+			if err != nil {
+				t.Fatalf("runPaginatedQuery: %v", err)
 			}
-			if len(page.Rows) != 10 {
-				t.Fatalf("page %d has wrong row count: %d, expected 10", i, len(page.Rows))
+
+			if len(result.Rows) != tc.expectedRows {
+				t.Fatalf("expected %d rows, got %d", tc.expectedRows, len(result.Rows))
 			}
-		}
-	})
 
-	t.Run("pagination_edge_cases", func(t *testing.T) {
-		// Test pagination with edge cases
-		testCases := []struct {
-			name            string
-			sql             string
-			page            int
-			pageSize        int
-			expectedRows    int
-			expectedHasMore bool
-		}{
-			{
-				name:            "first_page",
-				sql:             "SELECT id FROM test_users ORDER BY id",
-				page:            0,
-				pageSize:        10,
-				expectedRows:    10,
-				expectedHasMore: true,
-			},
-			{
-				name:            "last_page",
-				sql:             "SELECT id FROM test_users ORDER BY id",
-				page:            9,
-				pageSize:        10,
-				expectedRows:    10,
-				expectedHasMore: false,
-			},
-			{
-				name:            "empty_result",
-				sql:             "SELECT id FROM test_users WHERE id > 1000",
-				page:            0,
-				pageSize:        10,
-				expectedRows:    0,
-				expectedHasMore: false,
-			},
-			{
-				name:            "single_result",
-				sql:             "SELECT id FROM test_users WHERE id = 1",
-				page:            0,
-				pageSize:        10,
-				expectedRows:    1,
-				expectedHasMore: false,
-			},
-		}
+			if result.HasMore != tc.expectedHasMore {
+				t.Fatalf("expected hasMore %v, got %v", tc.expectedHasMore, result.HasMore)
+			}
+		})
+	}
+}
 
-		for _, tc := range testCases {
-			t.Run(tc.name, func(t *testing.T) {
-				result, err := srv.runPaginatedQuery(ctx, tc.sql, tc.page, tc.pageSize)
-				if err != nil {
-					t.Fatalf("runPaginatedQuery: %v", err)
-				}
+func TestSecurityAndValidation(t *testing.T) {
+	t.Parallel()
 
-				if len(result.Rows) != tc.expectedRows {
-					t.Fatalf("expected %d rows, got %d", tc.expectedRows, len(result.Rows))
-				}
+	// Setup test database
+	db := mustPool(t)
+	defer db.Close()
+	setupComprehensiveTestData(t, db)
 
-				if result.HasMore != tc.expectedHasMore {
-					t.Fatalf("expected hasMore %v, got %v", tc.expectedHasMore, result.HasMore)
-				}
-			})
-		}
-	})
+	// Setup mock OpenAI
+	llm := mockOpenAIComprehensive(t)
+	defer llm.Close()
 
-	t.Run("security_and_validation", func(t *testing.T) {
+	// Setup server
+	cfg := Config{
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+		OpenAIKey:   "test-key",
+		OpenAIBase:  llm.URL + "/v1",
+		OpenAIModel: "test-model",
+		SchemaTTL:   2 * time.Minute,
+		QueryTO:     30 * time.Second,
+		MaxRows:     50,
+	}
+
+	ctx := context.Background()
+	srv, err := newServer(ctx, cfg)
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
+	}
 		// Test input validation
 		testCases := []struct {
 			name    string
@@ -171,9 +224,36 @@ func TestComprehensiveStreaming(t *testing.T) {
 				}
 			})
 		}
-	})
+}
 
-	t.Run("query_complexity_protection", func(t *testing.T) {
+func TestQueryComplexityProtection(t *testing.T) {
+	t.Parallel()
+
+	// Setup test database
+	db := mustPool(t)
+	defer db.Close()
+	setupComprehensiveTestData(t, db)
+
+	// Setup mock OpenAI
+	llm := mockOpenAIComprehensive(t)
+	defer llm.Close()
+
+	// Setup server
+	cfg := Config{
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+		OpenAIKey:   "test-key",
+		OpenAIBase:  llm.URL + "/v1",
+		OpenAIModel: "test-model",
+		SchemaTTL:   2 * time.Minute,
+		QueryTO:     30 * time.Second,
+		MaxRows:     50,
+	}
+
+	ctx := context.Background()
+	srv, err := newServer(ctx, cfg)
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
+	}
 		// Test that expensive queries are detected and handled
 		expensiveQueries := []string{
 			"SELECT * FROM users u LEFT JOIN orders o ON u.id = o.user_id LEFT JOIN items i ON o.item_id = i.id",
@@ -197,7 +277,6 @@ func TestComprehensiveStreaming(t *testing.T) {
 				}
 			})
 		}
-	})
 }
 
 func TestConfigurationValidation(t *testing.T) {

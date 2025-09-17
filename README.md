@@ -1,76 +1,60 @@
 [![ci](https://github.com/subnetmarco/pgmcp/actions/workflows/ci.yml/badge.svg)](https://github.com/subnetmarco/pgmcp/actions/workflows/ci.yml)
- ar
+[![Go Report Card](https://goreportcard.com/badge/github.com/subnetmarco/pgmcp)](https://goreportcard.com/report/github.com/subnetmarco/pgmcp)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
 # PGMCP - PostgreSQL Model Context Protocol Server
 
-PGMCP is a Model Context Protocol (MCP) server that provides AI assistants with safe, read-only access to PostgreSQL databases through natural language queries. It acts as a bridge between AI models and your database, allowing you to ask questions in plain English and receive structured SQL results.
-
-ℹ️ Generated with AI under my supervision.
+PGMCP is a Model Context Protocol (MCP) server that provides AI assistants with safe, read-only access to **any PostgreSQL database** through natural language queries. It acts as a bridge between AI models and your database, allowing you to ask questions in plain English and receive structured SQL results with robust error handling and performance optimization.
 
 ## What is MCP?
 
-The [Model Context Protocol](https://modelcontextprotocol.io/) is an open standard that enables AI assistants to securely connect to external data sources and tools. PGMCP implements this protocol specifically for PostgreSQL databases.
+The [Model Context Protocol](https://modelcontextprotocol.io/) is an open standard that enables AI assistants to securely connect to external data sources and tools. PGMCP implements this protocol specifically for PostgreSQL databases and **works with any MCP-compatible client** including Cursor, Claude Desktop, VS Code extensions, and custom integrations.
 
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                            PGMCP Architecture                                   │
-└─────────────────────────────────────────────────────────────────────────────────┘
+👤 User / AI Assistant
+         │
+         │ "Who are the top customers?"
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Any MCP Client                           │
+│                                                             │
+│  PGMCP CLI  │  Cursor  │  Claude Desktop  │  VS Code  │ ... │
+│  JSON/CSV   │  Chat    │  AI Assistant    │  Editor   │     │
+└─────────────────────────────────────────────────────────────┘
+         │
+         │ HTTP SSE / MCP Protocol
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    PGMCP Server                             │
+│                                                             │
+│  🔒 Security    🧠 AI Engine      🌊 Streaming               │
+│  • Input Valid  • Schema Cache    • Auto-Pagination         │
+│  • Audit Log    • OpenAI API      • Memory Management       │
+│  • SQL Guard    • Error Recovery  • Connection Pool         │
+└─────────────────────────────────────────────────────────────┘
+         │
+         │ Read-Only SQL Queries
+         ▼
+┌─────────────────────────────────────────────────────────────┐
+│                Your PostgreSQL Database                     │
+│                                                             │
+│  Any Schema: E-commerce, Analytics, CRM, etc.               │
+│  Tables • Views • Indexes • Functions                       │
+└─────────────────────────────────────────────────────────────┘
 
-    👤 User / AI Assistant
-           │
-           │ Natural Language Query
-           │ "Who are the top customers?"
-           ▼
-    ┌─────────────────┐
-    │   PGMCP Client  │ ◄─── Command Line Interface
-    │                 │      • Multiple output formats
-    │ • Error Handling│      • Streaming support  
-    │ • Format Output │      • Verbose mode
-    └─────────────────┘
-           │
-           │ HTTP SSE / MCP Protocol
-           ▼
-    ┌─────────────────────────────────────────────────────────────────────────┐
-    │                        PGMCP Server                                     │
-    │                                                                         │
-    │  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐   │
-    │  │ 🔒 Security     │    │ 🧠 AI Engine    │    │ 🌊 Streaming    │   │
-    │  │                 │    │                 │    │                 │   │
-    │  │ • Input Validation   │ • Schema Cache   │    │ • Auto-Pagination│ │
-    │  │ • Audit Logging │    │ • OpenAI API    │    │ • Memory Mgmt   │   │
-    │  │ • SQL Injection │    │ • Smart Limits  │    │ • Result Chunking│  │
-    │  │   Protection    │    │ • Query Understanding│ • Connection Pool│  │
-    │  └─────────────────┘    └─────────────────┘    └─────────────────┘   │
-    └─────────────────────────────────────────────────────────────────────────┘
-           │
-           │ Read-Only SQL Queries
-           │ (Automatically Paginated)
-           ▼
-    ┌─────────────────────────────────────────────────────────────────────────┐
-    │                    Your PostgreSQL Database                             │
-    │                                                                         │
-    │  Any schema: E-commerce, Analytics, CRM, Inventory, Financial, etc.     │
-    │                                                                         │
-    │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐   │
-    │  │   Tables    │  │   Views     │  │   Indexes   │  │  Functions  │   │
-    │  │   Any Size  │  │   Custom    │  │   Optimized │  │   Stored    │   │
-    │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘   │
-    └─────────────────────────────────────────────────────────────────────────┘
-
-External Services:
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────────┐
-│   OpenAI API    │    │ Compatible APIs │    │    Local LLMs           │
-│   gpt-4o-mini   │    │ Anthropic, etc. │    │ Ollama, LocalAI, etc.   │
-└─────────────────┘    └─────────────────┘    └─────────────────────────┘
+External AI Services:
+OpenAI API • Anthropic • Local LLMs (Ollama, etc.)
 
 Key Benefits:
-✅ Works with ANY PostgreSQL database
+✅ Works with ANY PostgreSQL database (no assumptions about schema)
 ✅ No schema modifications required  
 ✅ Read-only access (100% safe)
 ✅ Automatic streaming for large results
 ✅ Intelligent query understanding
-✅ Production-ready security
+✅ Robust error handling (graceful AI failure recovery)
+✅ Production-ready security and performance
 ```
 
 ### Data Flow Example
@@ -104,11 +88,15 @@ Key Benefits:
 - **OpenAI Integration**: Leverages OpenAI's language models for SQL generation
 - **Connection Pooling**: Efficient PostgreSQL connection management with configurable limits
 - **Enhanced Security**: Input sanitization, audit logging, and request size limits
+- **Robust Error Handling**: Graceful handling of AI-generated SQL errors with helpful user feedback
+- **Universal Database Support**: Works with ANY PostgreSQL database - no schema assumptions or modifications required
+- **AI Safety Features**: Intelligent handling of unpredictable AI behavior with fallback strategies
+- **Performance Protection**: Automatic detection and simplification of expensive queries
 - **Graceful Shutdown**: Signal handling and proper resource cleanup
 - **Configuration Validation**: Comprehensive validation with helpful error messages
 - **Multiple Output Formats**: Table, JSON, and CSV output with beautiful formatting
 - **Authentication**: Optional Bearer token authentication
-- **Comprehensive Testing**: Unit, integration, and streaming tests included
+- **Comprehensive Testing**: Unit, integration, security, and performance tests included
 
 ## Architecture
 
@@ -120,6 +108,8 @@ The project consists of two main components:
 - **AI Integration**: Uses OpenAI API for natural language to SQL translation with intelligent query understanding
 - **Automatic Streaming**: Fetches large result sets across multiple pages automatically
 - **Safety Guards**: Ensures only read-only operations with input sanitization and audit logging
+- **Robust Error Recovery**: Gracefully handles AI mistakes with helpful error messages instead of system crashes
+- **Performance Intelligence**: Detects expensive queries and provides optimization suggestions
 - **Schema Introspection**: Automatically discovers and caches database schema with performance indexes
 - **HTTP Transport**: Serves MCP over HTTP with Server-Sent Events, request size limits, and graceful shutdown
 - **Configuration Management**: Comprehensive validation with helpful error messages and environment variable support
@@ -185,6 +175,38 @@ export DATABASE_URL="postgres://user:pass@your-db-host:5432/your_database"
 ./pgmcp-client -ask "What tables do I have?"
 ./pgmcp-client -search "customer"
 ```
+
+## Robust AI Error Handling
+
+PGMCP is designed to handle the inherent unpredictability of AI systems gracefully:
+
+### **When AI Makes Mistakes**
+
+AI models sometimes generate SQL that references non-existent columns or tables. Instead of crashing, PGMCP:
+
+✅ **Detects the Error**: Catches database errors like "column does not exist"  
+✅ **Provides Helpful Feedback**: Returns user-friendly error messages with suggestions  
+✅ **Shows Transparency**: Displays the actual SQL that was generated for learning  
+✅ **Maintains Service**: System continues operating normally  
+✅ **Logs Everything**: Comprehensive audit trail for debugging  
+
+### **Example Error Handling**
+
+**User Query**: `"Give me the user that purchased the most items"`
+
+**AI Generated SQL**: `SELECT user_id FROM order_items...` *(incorrect - user_id doesn't exist in order_items)*
+
+**PGMCP Response**:
+```json
+{
+  "error": "Column not found in generated query",
+  "suggestion": "Try rephrasing your question or ask about specific tables",
+  "original_sql": "SELECT user_id, COUNT(*) FROM order_items GROUP BY user_id...",
+  "note": "query failed - column not found"
+}
+```
+
+This approach makes PGMCP **production-ready** for real-world use where AI behavior can be unpredictable.
 
 **Supported Database Types:**
 - **E-commerce platforms** (orders, products, customers)
@@ -596,6 +618,38 @@ PGMCP makes your PostgreSQL database accessible to AI assistants through natural
 - "Create a CSV of all [table_name] records"
 - "Show me statistics for [time_period]"
 
+## Testing & Quality Assurance
+
+PGMCP includes comprehensive test coverage to ensure reliability and performance:
+
+### **Test Suite Coverage**
+- **30+ Unit Tests**: Core functionality, SQL validation, error handling, pagination
+- **Integration Tests**: End-to-end database operations, schema loading, MCP protocol compliance  
+- **Security Tests**: Input sanitization, SQL injection protection, audit logging
+- **Performance Tests**: Concurrent safety, memory usage, query optimization
+- **Error Handling Tests**: AI failure scenarios, graceful degradation, user feedback
+
+### **Running Tests**
+```bash
+# Unit tests (no database required)
+go test ./server -v
+
+# Integration tests (requires PostgreSQL)
+go test ./server -tags=integration -v
+
+# Performance benchmarks
+go test ./server -tags=integration -bench=. -v
+
+# All tests with coverage
+go test ./... -cover -v
+```
+
+### **CI/CD Pipeline**
+- **Build Verification**: Server and client compilation checks
+- **Code Quality**: Linting with `go vet` and `gofmt`
+- **Comprehensive Testing**: All test suites run automatically
+- **Multi-version Support**: Tested across Go and PostgreSQL versions
+
 ## Troubleshooting
 
 ### **Connection Issues**
@@ -618,6 +672,26 @@ curl -H "Accept: text/event-stream" http://localhost:8080/mcp/sse
 # Check client configuration
 ./pgmcp-client -ask "test query" -verbose
 ```
+
+### **AI Query Issues**
+
+If the AI generates incorrect SQL, PGMCP handles it gracefully:
+
+```json
+// Example: Column not found error
+{
+  "error": "Column not found in generated query",
+  "suggestion": "Try rephrasing your question or ask about specific tables",
+  "original_sql": "SELECT non_existent_column FROM table...",
+  "note": "query failed - column not found"
+}
+```
+
+**Common Solutions:**
+- **Rephrase your question** to be more specific about table/column names
+- **Ask about schema first**: `"What columns are in the [table_name] table?"`
+- **Use simpler queries**: Break complex questions into smaller parts
+- **Check the generated SQL** in the response to understand what went wrong
 
 ### **Performance Optimization**
 ```bash
