@@ -99,7 +99,7 @@ func mockOpenAI(t *testing.T) *httptest.Server {
 		Created int64  `json:"created"`
 		Model   string `json:"model"`
 		Choices []struct {
-			Index        int `json:"index"`
+			Index        int    `json:"index"`
 			FinishReason string `json:"finish_reason"`
 			Message      struct {
 				Role    string `json:"role"`
@@ -165,9 +165,9 @@ ORDER BY i.created_at DESC
 LIMIT 3`
 		}
 		resp := chatResp{
-			ID:      "mock",
-			Object:  "chat.completion",
-			Model:   "mock",
+			ID:     "mock",
+			Object: "chat.completion",
+			Model:  "mock",
 			Choices: []struct {
 				Index        int    `json:"index"`
 				FinishReason string `json:"finish_reason"`

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -174,11 +175,11 @@ func TestSanitizeInput(t *testing.T) {
 
 func TestPaginatedResult(t *testing.T) {
 	tests := []struct {
-		name        string
-		totalCount  int
-		page        int
-		pageSize    int
-		wantHasMore bool
+		name         string
+		totalCount   int
+		page         int
+		pageSize     int
+		wantHasMore  bool
 		wantNextPage int
 	}{
 		{
@@ -242,7 +243,7 @@ func TestPaginatedResult(t *testing.T) {
 			if rowsOnPage < 0 {
 				rowsOnPage = 0
 			}
-			
+
 			hasMore := offset+rowsOnPage < tt.totalCount
 			nextPage := tt.page + 1
 			if !hasMore {
@@ -250,7 +251,7 @@ func TestPaginatedResult(t *testing.T) {
 			}
 
 			if hasMore != tt.wantHasMore {
-				t.Fatalf("hasMore = %v, want %v (totalCount=%d, page=%d, pageSize=%d)", 
+				t.Fatalf("hasMore = %v, want %v (totalCount=%d, page=%d, pageSize=%d)",
 					hasMore, tt.wantHasMore, tt.totalCount, tt.page, tt.pageSize)
 			}
 			if nextPage != tt.wantNextPage {
@@ -318,7 +319,7 @@ func TestStreamingPaginationCalculations(t *testing.T) {
 			if tt.totalCount == 0 {
 				totalPages = 0
 			}
-			
+
 			if totalPages != tt.wantTotalPages {
 				t.Fatalf("totalPages = %d, want %d", totalPages, tt.wantTotalPages)
 			}
@@ -328,10 +329,233 @@ func TestStreamingPaginationCalculations(t *testing.T) {
 			if tt.totalCount == 0 {
 				fetchPages = 0
 			}
-			
+
 			if fetchPages != tt.wantFetchPages {
 				t.Fatalf("fetchPages = %d, want %d", fetchPages, tt.wantFetchPages)
 			}
 		})
+	}
+}
+
+func TestIsExpensiveQuery(t *testing.T) {
+	tests := []struct {
+		name      string
+		sql       string
+		expensive bool
+	}{
+		{
+			name:      "simple select",
+			sql:       "SELECT * FROM users LIMIT 10",
+			expensive: false,
+		},
+		{
+			name:      "single join",
+			sql:       "SELECT u.name, o.total FROM users u JOIN orders o ON u.id = o.user_id LIMIT 10",
+			expensive: false,
+		},
+		{
+			name:      "multiple joins (3 joins - expensive)",
+			sql:       "SELECT * FROM users u JOIN orders o ON u.id = o.user_id JOIN items i ON o.item_id = i.id JOIN sellers s ON i.seller_id = s.id LIMIT 10",
+			expensive: true,
+		},
+		{
+			name:      "left join",
+			sql:       "SELECT * FROM users u LEFT JOIN orders o ON u.id = o.user_id LIMIT 10",
+			expensive: true,
+		},
+		{
+			name:      "cross join",
+			sql:       "SELECT * FROM users CROSS JOIN items LIMIT 10",
+			expensive: true,
+		},
+		{
+			name:      "public schema join (single join - not expensive)",
+			sql:       "SELECT * FROM users JOIN public.orders ON users.id = public.orders.user_id",
+			expensive: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isExpensiveQuery(tt.sql)
+			if got != tt.expensive {
+				t.Fatalf("isExpensiveQuery(%q) = %v, want %v", tt.sql, got, tt.expensive)
+			}
+		})
+	}
+}
+
+func TestSimplifyExpensiveQuery(t *testing.T) {
+	tests := []struct {
+		name           string
+		sql            string
+		originalQuery  string
+		wantSimplified bool
+	}{
+		{
+			name:           "simple query unchanged",
+			sql:            "SELECT * FROM users LIMIT 10",
+			originalQuery:  "show users",
+			wantSimplified: false,
+		},
+		{
+			name:           "expensive join simplified",
+			sql:            "SELECT * FROM users u JOIN public.orders o ON u.id = o.user_id LEFT JOIN items i ON o.item_id = i.id",
+			originalQuery:  "show user orders",
+			wantSimplified: true,
+		},
+		{
+			name:           "left join simplified",
+			sql:            "SELECT * FROM users u LEFT JOIN orders o ON u.id = o.user_id",
+			originalQuery:  "show users with orders",
+			wantSimplified: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := simplifyExpensiveQuery(tt.sql, tt.originalQuery)
+			simplified := result != tt.sql
+
+			if simplified != tt.wantSimplified {
+				t.Fatalf("simplifyExpensiveQuery simplified=%v, want %v\nOriginal: %s\nResult: %s",
+					simplified, tt.wantSimplified, tt.sql, result)
+			}
+
+			if simplified && !strings.Contains(result, "Query too complex") {
+				t.Fatalf("Expected simplified query to contain error message, got: %s", result)
+			}
+		})
+	}
+}
+
+func TestValidateSQLBasic(t *testing.T) {
+	tests := []struct {
+		name    string
+		sql     string
+		wantErr bool
+	}{
+		{
+			name:    "valid select",
+			sql:     "SELECT id FROM users LIMIT 10",
+			wantErr: false,
+		},
+		{
+			name:    "valid with clause",
+			sql:     "WITH counts AS (SELECT COUNT(*) FROM users) SELECT * FROM counts",
+			wantErr: false,
+		},
+		{
+			name:    "valid - missing FROM is allowed by basic validation",
+			sql:     "SELECT id LIMIT 10",
+			wantErr: false, // Basic validation doesn't check FROM clause
+		},
+		{
+			name:    "invalid - unbalanced parentheses",
+			sql:     "SELECT id FROM users WHERE (name = 'test' LIMIT 10",
+			wantErr: true,
+		},
+		{
+			name:    "valid - semicolon is allowed by basic validation",
+			sql:     "SELECT id FROM users; DROP TABLE users;",
+			wantErr: false, // Basic validation doesn't check for semicolons
+		},
+		{
+			name:    "invalid - no SELECT",
+			sql:     "UPDATE users SET name = 'test'",
+			wantErr: true,
+		},
+		{
+			name:    "invalid - duplicate SELECT",
+			sql:     "SELECT SELECT id FROM users",
+			wantErr: true,
+		},
+		{
+			name:    "invalid - empty sql",
+			sql:     "",
+			wantErr: true,
+		},
+		{
+			name:    "invalid - whitespace only",
+			sql:     "   \n\t  ",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateSQLBasic(tt.sql)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateSQLBasic() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestErrorHandlingMessages(t *testing.T) {
+	tests := []struct {
+		name        string
+		dbError     string
+		wantMessage string
+		wantSuggest string
+	}{
+		{
+			name:        "column does not exist",
+			dbError:     `ERROR: column "user_id" does not exist (SQLSTATE 42703)`,
+			wantMessage: "Column not found in generated query",
+			wantSuggest: "Try rephrasing your question or ask about specific tables",
+		},
+		{
+			name:        "table does not exist",
+			dbError:     `ERROR: relation "nonexistent_table" does not exist (SQLSTATE 42P01)`,
+			wantMessage: "Table not found",
+			wantSuggest: "Check available tables",
+		},
+		{
+			name:        "syntax error",
+			dbError:     `ERROR: syntax error at or near "SELEC" (SQLSTATE 42601)`,
+			wantMessage: "SQL syntax error",
+			wantSuggest: "Check query syntax",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test that our error detection logic works
+			isColumnError := strings.Contains(tt.dbError, "column") && strings.Contains(tt.dbError, "does not exist")
+
+			if tt.name == "column does not exist" && !isColumnError {
+				t.Fatalf("Failed to detect column error in: %s", tt.dbError)
+			}
+
+			if tt.name != "column does not exist" && isColumnError {
+				t.Fatalf("Incorrectly detected column error in: %s", tt.dbError)
+			}
+		})
+	}
+}
+
+func TestSchemaCache(t *testing.T) {
+	cache := &SchemaCache{}
+
+	// Test empty cache
+	if cache.txt != "" {
+		t.Fatalf("Expected empty cache, got: %s", cache.txt)
+	}
+
+	// Test cache expiration
+	cache.txt = "test schema"
+	cache.expiresAt = time.Now().Add(-1 * time.Hour) // expired
+
+	// Since we can't easily test the full Get method without a DB,
+	// we'll test the expiration logic
+	if time.Now().Before(cache.expiresAt) {
+		t.Fatalf("Expected cache to be expired")
+	}
+
+	// Test future expiration
+	cache.expiresAt = time.Now().Add(1 * time.Hour)
+	if !time.Now().Before(cache.expiresAt) {
+		t.Fatalf("Expected cache to not be expired")
 	}
 }

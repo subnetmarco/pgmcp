@@ -20,7 +20,8 @@ import (
 )
 
 type asksFlag []string
-func (a *asksFlag) String() string { return strings.Join(*a, "; ") }
+
+func (a *asksFlag) String() string     { return strings.Join(*a, "; ") }
 func (a *asksFlag) Set(v string) error { *a = append(*a, v); return nil }
 
 func main() {
@@ -56,7 +57,9 @@ func main() {
 	defer cancel()
 
 	session, err := client.Connect(ctx, tr, nil)
-	if err != nil { log.Fatalf("connect to %s failed: %v", *serverURL, err) }
+	if err != nil {
+		log.Fatalf("connect to %s failed: %v", *serverURL, err)
+	}
 	defer session.Close()
 
 	if _, err := session.ListTools(ctx, &mcp.ListToolsParams{}); err != nil {
@@ -83,18 +86,18 @@ func main() {
 
 func runAsk(ctx context.Context, session *mcp.ClientSession, question, format string, verbose bool, maxRows int) {
 	args := map[string]any{"query": question, "max_rows": maxRows}
-	
+
 	if verbose {
 		fmt.Printf("🌊 Streaming query (max %d rows)...\n", maxRows)
 	}
-	
+
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "ask", Arguments: args})
-	if err != nil { 
-		log.Fatalf("ask failed: %v", err) 
+	if err != nil {
+		log.Fatalf("ask failed: %v", err)
 	}
-	if res.IsError { 
+	if res.IsError {
 		printContent(res.Content)
-		log.Fatalf("ask returned error") 
+		log.Fatalf("ask returned error")
 	}
 
 	// Handle streaming response
@@ -105,7 +108,7 @@ func runAsk(ctx context.Context, session *mcp.ClientSession, question, format st
 			printFormattedResult(result, format, verbose)
 			return
 		}
-		
+
 		// Fallback to original
 		b, _ = json.MarshalIndent(res.StructuredContent, "", "  ")
 		fmt.Println(string(b))
@@ -119,11 +122,15 @@ func runSearch(ctx context.Context, session *mcp.ClientSession, q, format string
 	call(ctx, session, "search", args, format, verbose)
 }
 
-
 func call(ctx context.Context, session *mcp.ClientSession, tool string, args map[string]any, format string, verbose bool) {
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: tool, Arguments: args})
-	if err != nil { log.Fatalf("%s failed: %v", tool, err) }
-	if res.IsError { printContent(res.Content); log.Fatalf("%s returned error", tool) }
+	if err != nil {
+		log.Fatalf("%s failed: %v", tool, err)
+	}
+	if res.IsError {
+		printContent(res.Content)
+		log.Fatalf("%s returned error", tool)
+	}
 
 	if res.StructuredContent != nil {
 		// Convert to map and use enhanced formatting
@@ -133,7 +140,7 @@ func call(ctx context.Context, session *mcp.ClientSession, tool string, args map
 			printFormattedResult(result, format, verbose)
 			return
 		}
-		
+
 		// Fallback to original
 		b, _ = json.MarshalIndent(res.StructuredContent, "", "  ")
 		fmt.Println(string(b))
@@ -147,7 +154,7 @@ func printFormattedResult(result map[string]any, format string, verbose bool) {
 	rows, hasRows := result["rows"].([]any)
 	sql, hasSQL := result["sql"].(string)
 	note, _ := result["note"].(string)
-	
+
 	if verbose && hasSQL {
 		fmt.Printf("📝 Generated SQL: %s\n\n", sql)
 	}
@@ -181,7 +188,6 @@ func printFormattedResult(result map[string]any, format string, verbose bool) {
 		printJSON(result)
 	}
 }
-
 
 func printTable(rows []any) {
 	if len(rows) == 0 {
@@ -217,7 +223,7 @@ func printTable(rows []any) {
 
 	// Create table writer
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	
+
 	// Print header
 	for i, col := range columns {
 		if i > 0 {
@@ -302,7 +308,6 @@ func printCSV(rows []any) {
 	}
 }
 
-
 func printJSON(data any) {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
@@ -338,12 +343,18 @@ func printContent(cs []mcp.Content) {
 	for _, c := range cs {
 		switch v := c.(type) {
 		case *mcp.TextContent:
-			if pretty, ok := tryPrettyJSON(v.Text); ok { fmt.Println(pretty) } else { fmt.Println(v.Text) }
+			if pretty, ok := tryPrettyJSON(v.Text); ok {
+				fmt.Println(pretty)
+			} else {
+				fmt.Println(v.Text)
+			}
 		case *mcp.ImageContent:
 			out := map[string]any{"type": "image", "mimeType": v.MIMEType}
-			b, _ := json.MarshalIndent(out, "", "  "); fmt.Println(string(b))
+			b, _ := json.MarshalIndent(out, "", "  ")
+			fmt.Println(string(b))
 		default:
-			b, _ := json.MarshalIndent(v, "", "  "); fmt.Println(string(b))
+			b, _ := json.MarshalIndent(v, "", "  ")
+			fmt.Println(string(b))
 		}
 	}
 }
@@ -352,16 +363,26 @@ type authRoundTripper struct {
 	base   http.RoundTripper
 	bearer string
 }
+
 func (rt *authRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	r := req.Clone(req.Context())
-	if rt.bearer != "" { r.Header.Set("Authorization", "Bearer "+rt.bearer) }
+	if rt.bearer != "" {
+		r.Header.Set("Authorization", "Bearer "+rt.bearer)
+	}
 	return rt.base.RoundTrip(r)
 }
 
 func tryPrettyJSON(s string) (string, bool) {
 	var anyJSON any
-	if err := json.Unmarshal([]byte(s), &anyJSON); err != nil { return "", false }
+	if err := json.Unmarshal([]byte(s), &anyJSON); err != nil {
+		return "", false
+	}
 	b, _ := json.MarshalIndent(anyJSON, "", "  ")
 	return string(b), true
 }
-func getenv(k, def string) string { if v := os.Getenv(k); v != "" { return v }; return def }
+func getenv(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
+}
