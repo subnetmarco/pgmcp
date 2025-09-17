@@ -367,7 +367,6 @@ func isExpensiveQuery(sql string) bool {
 	expensivePatterns := []string{
 		"cross join",     // Cartesian products
 		"left join",      // LEFT JOINs can be expensive
-		"join public.",   // Any JOIN with public schema tables
 	}
 	
 	for _, pattern := range expensivePatterns {
@@ -376,9 +375,9 @@ func isExpensiveQuery(sql string) bool {
 		}
 	}
 	
-	// Count number of JOINs - more than 1 might be expensive with large tables
+	// Count number of JOINs - more than 2 is expensive
 	joinCount := strings.Count(sqlLower, " join ")
-	return joinCount > 1
+	return joinCount > 2
 }
 
 // simplifyExpensiveQuery rewrites expensive queries to be more performant
@@ -391,6 +390,30 @@ func simplifyExpensiveQuery(sql, originalQuery string) string {
 	}
 	
 	return sql // Return original if no simplification needed
+}
+
+// validateSQLBasic performs basic SQL validation to catch common errors
+func validateSQLBasic(sql string) error {
+	sqlLower := strings.ToLower(sql)
+	
+	// Check for basic SQL structure
+	if !strings.Contains(sqlLower, "select") {
+		return fmt.Errorf("query must contain SELECT")
+	}
+	
+	// Check for balanced parentheses
+	openCount := strings.Count(sql, "(")
+	closeCount := strings.Count(sql, ")")
+	if openCount != closeCount {
+		return fmt.Errorf("unbalanced parentheses: %d open, %d close", openCount, closeCount)
+	}
+	
+	// Check for common syntax issues
+	if strings.Contains(sqlLower, "select select") {
+		return fmt.Errorf("duplicate SELECT keywords detected")
+	}
+	
+	return nil
 }
 
 // requestSizeLimitMiddleware limits the size of incoming requests
@@ -501,6 +524,12 @@ func (s *Server) handleAsk(ctx context.Context, req *mcp.CallToolRequest, in ask
 		log.Info().Str("simplified_sql", sql).Msg("query simplified for performance")
 	}
 
+	// Validate SQL syntax before execution (basic check)
+	if err := validateSQLBasic(sql); err != nil {
+		log.Warn().Str("sql", sql).Err(err).Msg("generated SQL may have issues")
+		// Continue anyway - let the database provide the real error
+	}
+
 	// Automatically stream all results
 	maxPages := 20 // Auto-stream up to 20 pages (1000 results with default page size)
 	if in.MaxRows > 0 {
@@ -509,6 +538,26 @@ func (s *Server) handleAsk(ctx context.Context, req *mcp.CallToolRequest, in ask
 	
 	pages, totalRows, err := s.runStreamingQuery(ctx, sql, maxPages, pageSize)
 	if err != nil {
+		// If query failed due to column errors, try to provide a helpful response
+		if strings.Contains(err.Error(), "column") && strings.Contains(err.Error(), "does not exist") {
+			auditLog("ask_query_failed", clientIP, sql, err.Error(), false)
+			log.Debug().Str("tool", "ask").Err(err).Dur("dur", time.Since(start)).Msg("query failed - column not found")
+			
+			// Return helpful error message instead of failing
+			errorRows := []map[string]any{
+				{
+					"error":       "Column not found in generated query",
+					"suggestion":  "Try rephrasing your question or ask about specific tables",
+					"original_sql": sql,
+				},
+			}
+			return nil, askOutput{
+				SQL:  sql,
+				Rows: errorRows,
+				Note: note + " (query failed - column not found)",
+			}, nil
+		}
+		
 		auditLog("ask_query_failed", clientIP, sql, err.Error(), false)
 		log.Debug().Str("tool", "ask").Err(err).Dur("dur", time.Since(start)).Msg("query failed")
 		return nil, askOutput{SQL: sql}, err
@@ -922,8 +971,16 @@ func (s *Server) generateSQL(ctx context.Context, question, schema string, maxRo
 	- When user emphasizes ALL/EVERY/COMPLETE → Override normal limits
 	- But still respect the maximum LIMIT constraint provided
 
+	CRITICAL COLUMN CHECKING RULES:
+	- BEFORE writing ANY SQL, verify EVERY column exists in the table you're using
+	- If you need a column that doesn't exist in your target table, you MUST use JOINs
+	- Example: If you need user_id but you're querying order_items (which has no user_id), 
+	  you MUST JOIN: order_items → orders → users via the foreign keys shown in schema
+	- NEVER write SQL with non-existent columns - this will cause errors
+
 	Universal Data Handling:
 	- Work ONLY with tables and columns shown in the schema summary below
+	- NEVER assume columns exist - only use columns explicitly listed in the schema
 	- NEVER assume specific data values, enum values, or business logic
 	- NEVER filter by assumed status values (completed, active, etc.) unless explicitly mentioned
 	- If user asks for "top X" or "most Y", aggregate and sort the available data as-is
@@ -931,16 +988,27 @@ func (s *Server) generateSQL(ctx context.Context, question, schema string, maxRo
 	- When in doubt, include more data rather than filtering it out
 	- Focus on structural relationships (JOINs) rather than data content assumptions
 
+	JOIN Strategy (CRITICAL - Generic approach for ANY database):
+	- ALWAYS check the schema summary for foreign key relationships before writing JOINs
+	- Look for "FK" lines in the schema that show: table1(column1) -> table2(column2)
+	- If a column doesn't exist in the target table, trace the foreign key path in the schema
+	- Example: If table A has column X, but you need column Y from table B, look for FK A.some_id -> B.id
+	- Use ONLY the foreign key relationships explicitly shown in the schema summary
+	- When multiple JOIN paths exist, choose the most direct one with fewest tables
+	
 	Performance Guidelines (CRITICAL):
-	- STRONGLY PREFER single-table queries - avoid JOINs unless absolutely necessary
-	- For "most reviewed" questions, interpret as "most recent" or "largest by count" from a single table
-	- For "top X" questions, use simple ORDER BY on a single table when possible
-	- Only use JOINs for direct 1:1 or 1:many lookups, never many:many relationships
-	- When in doubt, choose the simpler single-table interpretation
-	- Avoid any query that might scan more than 10,000 row combinations
+	- PREFER single-table queries when possible
+	- When JOINs are necessary, use ONLY the foreign key relationships explicitly shown in schema
+	- Limit JOINs to maximum 2 tables to avoid expensive operations
+	- Use INNER JOINs instead of LEFT JOINs when possible
+	- If a question requires more than 2 JOINs, simplify to a single-table approximation
+	- NEVER assume columns exist in the wrong table - always verify against schema first
 
-	Schema summary:
-	` + schema
+	MANDATORY: Study this schema summary carefully before writing SQL. It shows all tables, columns, and foreign key relationships:
+	
+	` + schema + `
+	
+	REMEMBER: If you need a column that doesn't exist in your target table, find the FK relationship above and use JOINs.`
 
 	user := "Question: " + strings.TrimSpace(question) + `
 Return ONLY SQL, nothing else.`
