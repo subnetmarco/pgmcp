@@ -4,6 +4,8 @@
 
 PGMCP is a Model Context Protocol (MCP) server that provides AI assistants with safe, read-only access to PostgreSQL databases through natural language queries. It acts as a bridge between AI models and your database, allowing you to ask questions in plain English and receive structured SQL results.
 
+ℹ️ Generated with AI under my supervision.
+
 ## What is MCP?
 
 The [Model Context Protocol](https://modelcontextprotocol.io/) is an open standard that enables AI assistants to securely connect to external data sources and tools. PGMCP implements this protocol specifically for PostgreSQL databases.
