@@ -624,3 +624,183 @@ func mustPoolForBench(b *testing.B) *pgxpool.Pool {
 	}
 	return pool
 }
+
+func TestErrorHandlingIntegration(t *testing.T) {
+	t.Parallel()
+	
+	// Setup test database
+	db := mustPool(t)
+	defer db.Close()
+	setupComprehensiveTestData(t, db)
+
+	// Setup mock OpenAI that returns bad SQL
+	badSQLResponses := map[string]string{
+		"user that purchased most items": `SELECT user_id, COUNT(*) FROM order_items GROUP BY user_id ORDER BY COUNT(*) DESC LIMIT 1`, // user_id doesn't exist in order_items
+		"show me tables": `SELECT * FROM nonexistent_table LIMIT 10`, // table doesn't exist
+		"count all users": `SELEC COUNT(*) FROM users`, // syntax error
+	}
+	
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&req)
+		
+		messages := req["messages"].([]interface{})
+		userMsg := messages[len(messages)-1].(map[string]interface{})
+		question := strings.ToLower(userMsg["content"].(string))
+		
+		var sqlResponse string
+		for key, sql := range badSQLResponses {
+			if strings.Contains(question, key) {
+				sqlResponse = sql
+				break
+			}
+		}
+		
+		if sqlResponse == "" {
+			sqlResponse = "SELECT 1 as result LIMIT 1" // fallback
+		}
+		
+		resp := map[string]interface{}{
+			"choices": []map[string]interface{}{
+				{"message": map[string]interface{}{"content": sqlResponse}},
+			},
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer llm.Close()
+
+	cfg := mustConfig()
+	cfg.OpenAIURL = llm.URL
+	cfg.QueryTO = 5 * time.Second
+
+	srv := &Server{
+		cfg:   cfg,
+		db:    db,
+		cache: &SchemaCache{},
+		llm:   mockClient(llm.URL),
+		model: "gpt-4o-mini",
+	}
+
+	// Test column error handling
+	t.Run("column_does_not_exist", func(t *testing.T) {
+		result, err := srv.handleAsk(context.Background(), askInput{
+			Query: "Give me the user that purchased most items",
+		})
+		
+		if err != nil {
+			t.Fatalf("Expected graceful error handling, got error: %v", err)
+		}
+		
+		// Should return error information in rows
+		if len(result.Rows) == 0 {
+			t.Fatalf("Expected error information in rows, got empty result")
+		}
+		
+		errorRow := result.Rows[0]
+		if errorRow["error"] == nil {
+			t.Fatalf("Expected error field in response, got: %+v", errorRow)
+		}
+		
+		if errorRow["suggestion"] == nil {
+			t.Fatalf("Expected suggestion field in response, got: %+v", errorRow)
+		}
+		
+		if errorRow["original_sql"] == nil {
+			t.Fatalf("Expected original_sql field in response, got: %+v", errorRow)
+		}
+		
+		// Check that note indicates the error
+		if !strings.Contains(result.Note, "query failed") {
+			t.Fatalf("Expected note to indicate query failed, got: %s", result.Note)
+		}
+	})
+
+	// Test table error handling  
+	t.Run("table_does_not_exist", func(t *testing.T) {
+		result, err := srv.handleAsk(context.Background(), askInput{
+			Query: "show me tables",
+		})
+		
+		if err != nil {
+			t.Fatalf("Expected graceful error handling, got error: %v", err)
+		}
+		
+		// Should return some kind of error response
+		if len(result.Rows) == 0 {
+			t.Fatalf("Expected some result rows, got empty")
+		}
+	})
+
+	// Test syntax error handling
+	t.Run("syntax_error", func(t *testing.T) {
+		result, err := srv.handleAsk(context.Background(), askInput{
+			Query: "count all users",
+		})
+		
+		if err != nil {
+			t.Fatalf("Expected graceful error handling, got error: %v", err)
+		}
+		
+		// Should return some kind of error response
+		if len(result.Rows) == 0 {
+			t.Fatalf("Expected some result rows, got empty")
+		}
+	})
+}
+
+func TestSchemaLoadingIntegration(t *testing.T) {
+	t.Parallel()
+	
+	db := mustPool(t)
+	defer db.Close()
+	setupComprehensiveTestData(t, db)
+
+	// Test schema loading
+	schema, err := loadSchema(context.Background(), db)
+	if err != nil {
+		t.Fatalf("Failed to load schema: %v", err)
+	}
+	
+	if schema == "" {
+		t.Fatalf("Expected non-empty schema")
+	}
+	
+	// Check that schema contains expected elements
+	if !strings.Contains(schema, "TABLE") {
+		t.Fatalf("Expected schema to contain TABLE definitions, got: %s", schema)
+	}
+	
+	if !strings.Contains(schema, "FK") {
+		t.Fatalf("Expected schema to contain FK (foreign key) definitions, got: %s", schema)
+	}
+	
+	// Test schema caching
+	cache := &SchemaCache{}
+	
+	// First call should load from DB
+	schema1, err := cache.Get(context.Background(), db)
+	if err != nil {
+		t.Fatalf("Failed to get schema from cache: %v", err)
+	}
+	
+	// Second call should use cache
+	schema2, err := cache.Get(context.Background(), db)
+	if err != nil {
+		t.Fatalf("Failed to get schema from cache: %v", err)
+	}
+	
+	if schema1 != schema2 {
+		t.Fatalf("Expected cached schema to match, got different results")
+	}
+	
+	// Test cache expiration
+	cache.expiresAt = time.Now().Add(-1 * time.Hour) // force expiration
+	schema3, err := cache.Get(context.Background(), db)
+	if err != nil {
+		t.Fatalf("Failed to refresh expired cache: %v", err)
+	}
+	
+	if schema3 == "" {
+		t.Fatalf("Expected refreshed schema to be non-empty")
+	}
+}
