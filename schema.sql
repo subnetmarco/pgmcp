@@ -12,14 +12,14 @@ DROP TABLE IF EXISTS sellers CASCADE;
 DROP TABLE IF EXISTS reviews CASCADE;
 DROP TABLE IF EXISTS items CASCADE;
 DROP TABLE IF EXISTS brands CASCADE;
-DROP TABLE IF EXISTS categories CASCADE;
+DROP TABLE IF EXISTS "Categories" CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 
 -- Categories table (hierarchical categories)
-CREATE TABLE categories (
+CREATE TABLE "Categories" (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
-  parent_id INT REFERENCES categories(id),
+  parent_id INT REFERENCES "Categories"(id),
   slug TEXT UNIQUE NOT NULL,
   description TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -59,7 +59,7 @@ CREATE TABLE items (
   title TEXT NOT NULL,
   description TEXT,
   brand_id INT REFERENCES brands(id),
-  category_id INT NOT NULL REFERENCES categories(id),
+  category_id INT NOT NULL REFERENCES "Categories"(id),
   price_cents INT NOT NULL CHECK (price_cents > 0),
   list_price_cents INT, -- original price before discount
   weight_grams INT,
@@ -224,7 +224,7 @@ CREATE INDEX idx_users_prime ON users(is_prime);
 -- ============================================================================
 
 -- Insert categories (hierarchical)
-INSERT INTO categories (name, parent_id, slug, description) VALUES
+INSERT INTO "Categories" (name, parent_id, slug, description) VALUES
 ('Electronics', NULL, 'electronics', 'Electronic devices and accessories'),
 ('Computers', 1, 'computers', 'Laptops, desktops, and computer accessories'),
 ('Laptops', 2, 'laptops', 'Portable computers'),
@@ -418,7 +418,7 @@ SELECT
   0, -- Review count (will be updated based on actual reviews)
   now() - (random() * interval '1 year')
 FROM generate_series(1, 100) -- 100 items per category
-CROSS JOIN (SELECT id as category_id FROM categories WHERE parent_id IS NOT NULL) cat;
+CROSS JOIN (SELECT id as category_id FROM "Categories" WHERE parent_id IS NOT NULL) cat;
 
 -- Link items to sellers with realistic variability
 -- Some items have many sellers (popular), others have few or one seller
@@ -661,7 +661,7 @@ WHERE random() > 0.05; -- 95% of orders have invoices
 
 -- Revenue by category:
 -- SELECT c.name, SUM(oi.quantity * oi.unit_price_cents) as revenue_cents
--- FROM categories c
+-- FROM "Categories" c
 -- JOIN items i ON c.id = i.category_id
 -- JOIN order_items oi ON i.id = oi.item_id
 -- GROUP BY c.id, c.name

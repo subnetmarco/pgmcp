@@ -149,13 +149,39 @@ fks AS (
   WHERE co.contype='f'
 )
 SELECT
-  'TABLE '||cols.schema||'.'||cols.table||'('||
-    string_agg(cols.column||' '||cols.data_type||CASE WHEN cols.is_pk THEN ' PRIMARY KEY' ELSE '' END, ', ' ORDER BY cols.column)||
+  'TABLE '||cols.schema||'.'||
+  CASE 
+    WHEN cols.table ~ '^[a-z_][a-z0-9_]*$' THEN cols.table
+    ELSE '"' || cols.table || '"'
+  END ||'('||
+    string_agg(
+      CASE 
+        WHEN cols.column ~ '^[a-z_][a-z0-9_]*$' THEN cols.column
+        ELSE '"' || cols.column || '"'
+      END ||' '||cols.data_type||CASE WHEN cols.is_pk THEN ' PRIMARY KEY' ELSE '' END, 
+      ', ' ORDER BY cols.column
+    )||
   ')' AS line
 FROM cols
 GROUP BY cols.schema, cols.table
 UNION ALL
-SELECT 'FK '||src_schema||'.'||src_table||'('||src_column||') -> '||dst_schema||'.'||dst_table||'('||dst_column||')'
+SELECT 'FK '||src_schema||'.'||
+  CASE 
+    WHEN src_table ~ '^[a-z_][a-z0-9_]*$' THEN src_table
+    ELSE '"' || src_table || '"'
+  END ||'('||
+  CASE 
+    WHEN src_column ~ '^[a-z_][a-z0-9_]*$' THEN src_column
+    ELSE '"' || src_column || '"'
+  END ||') -> '||dst_schema||'.'||
+  CASE 
+    WHEN dst_table ~ '^[a-z_][a-z0-9_]*$' THEN dst_table
+    ELSE '"' || dst_table || '"'
+  END ||'('||
+  CASE 
+    WHEN dst_column ~ '^[a-z_][a-z0-9_]*$' THEN dst_column
+    ELSE '"' || dst_column || '"'
+  END ||')'
 FROM fks
 ORDER BY 1;`
 
@@ -954,6 +980,7 @@ func (s *Server) generateSQL(ctx context.Context, question, schema string, maxRo
 	- Always include an explicit LIMIT <= ` + fmt.Sprint(maxRows) + `.
 	- Do not add semicolons.
 	- Return concise, meaningful column aliases.
+	- CRITICAL: Use table and column names EXACTLY as shown in the schema below, including quotes when present.
 
 	Query Scope Rules:
 	- SINGULAR questions ("Who is the...", "What is the...") → LIMIT 1
@@ -972,9 +999,12 @@ func (s *Server) generateSQL(ctx context.Context, question, schema string, maxRo
 
 	CRITICAL COLUMN CHECKING RULES:
 	- BEFORE writing ANY SQL, verify EVERY column exists in the table you're using
+	- ONLY use columns that are explicitly listed in the schema below
 	- If you need a column that doesn't exist in your target table, you MUST use JOINs
 	- Example: If you need user_id but you're querying order_items (which has no user_id), 
 	  you MUST JOIN: order_items → orders → users via the foreign keys shown in schema
+	- NEVER assume standard columns like 'id' exist - many tables use composite keys
+	- For counting records: use COUNT(*) instead of COUNT(table.id) unless 'id' is explicitly shown
 	- NEVER write SQL with non-existent columns - this will cause errors
 
 	Universal Data Handling:
@@ -986,6 +1016,21 @@ func (s *Server) generateSQL(ctx context.Context, question, schema string, maxRo
 	- Use column names and relationships exactly as they appear in the schema
 	- When in doubt, include more data rather than filtering it out
 	- Focus on structural relationships (JOINs) rather than data content assumptions
+
+	CRITICAL Identifier Rules (PostgreSQL Case Sensitivity):
+	- PostgreSQL identifiers are case-sensitive when quoted with double quotes
+	- Use table and column names EXACTLY as they appear in the schema below
+	- If the schema shows "Book" (with quotes), you MUST use "Book" in your SQL
+	- If the schema shows book (no quotes), you can use book, Book, or BOOK
+	- NEVER change the case or remove quotes from identifiers shown in the schema
+	- When in doubt, copy the identifier exactly as shown in the schema
+
+	CRITICAL Counting and Aggregation Rules:
+	- For counting records, use COUNT(*) or COUNT(1) instead of COUNT(table.id)
+	- Only use COUNT(column_name) if that column is explicitly listed in the schema
+	- Many tables use composite primary keys and don't have an 'id' column
+	- For aggregating quantities or amounts, use SUM(column_name) where column_name exists
+	- Always verify the column exists in the schema before using it in COUNT, SUM, AVG, etc.
 
 	JOIN Strategy (CRITICAL - Generic approach for ANY database):
 	- ALWAYS check the schema summary for foreign key relationships before writing JOINs

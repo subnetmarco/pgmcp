@@ -354,8 +354,8 @@ func mockOpenAIFast(tb testing.TB) *httptest.Server {
 			return
 		}
 
-		// Return fast, simple SQL for tables that actually exist
-		sql := "SELECT id, name, email FROM users ORDER BY id LIMIT 10"
+		// Return fast, simple SQL for tables that actually exist in the test database
+		sql := "SELECT id, name FROM test_users ORDER BY id LIMIT 10"
 
 		resp := map[string]any{
 			"id":      "chatcmpl-test",
