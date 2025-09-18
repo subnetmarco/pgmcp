@@ -130,7 +130,7 @@ PGMCP works with **any PostgreSQL database**. The project includes a comprehensi
 
 ### **Core Tables**
 - **Users** (5,000): Customer profiles with Prime status, addresses, and geographic distribution
-- **Categories** (23): Hierarchical product categories (Electronics > Computers > Laptops)
+- **"Categories"** (23): Hierarchical product categories (Electronics > Computers > Laptops) - *demonstrates mixed-case table handling*
 - **Brands** (20): Major brands like Apple, Samsung, Nike, etc.
 - **Items** (1,800): Products with rich metadata (ratings, reviews, inventory, pricing)
 - **Sellers** (500): Marketplace sellers with business profiles and ratings
