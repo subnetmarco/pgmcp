@@ -190,26 +190,6 @@ Edit `~/.config/claude-desktop/claude_desktop_config.json`:
 }
 ```
 
-## PostgreSQL Case Sensitivity
-
-PGMCP automatically handles PostgreSQL's case-sensitive identifiers:
-
-```sql
--- Database has mixed-case table
-CREATE TABLE "Categories" (id SERIAL, name TEXT);
-
--- PGMCP schema shows (with quotes)
-TABLE public."Categories"(id integer, name text)
-
--- AI generates correct SQL
-SELECT name FROM "Categories" WHERE id = 1;
-```
-
-**Benefits:**
-- Works with any PostgreSQL naming convention
-- No schema changes required
-- Eliminates "relation does not exist" errors for mixed-case tables
-
 ## API Tools
 
 - **`ask`**: Natural language questions → SQL queries with automatic streaming
