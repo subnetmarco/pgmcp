@@ -31,8 +31,8 @@ export OPENAI_API_KEY="your-api-key"
 ./pgmcp-server
 
 # Test with client
-./pgmcp-client -ask "What tables do I have?" -format table
-./pgmcp-client -ask "Show me recent records" -format table
+./pgmcp-client -ask "Who is the user that places the most orders?" -format table
+./pgmcp-client -ask "Show me the top 40 most reviewed items in the marketplace" -format table
 ```
 
 ### Environment Variables
