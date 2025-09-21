@@ -20,8 +20,8 @@ github.com/mattn/go-colorable v0.1.13/go.mod h1:7S9/ev0klgBDR4GtXTXX8a3vIGJpMovk
 github.com/mattn/go-isatty v0.0.16/go.mod h1:kYGgaQfpe5nmfYZH+SKPsOc2e4SrIfOl2e/yFXSvRLM=
 github.com/mattn/go-isatty v0.0.19 h1:JITubQf0MOLdlGRuRq+jtsDlekdYPia9ZFsB8h/APPA=
 github.com/mattn/go-isatty v0.0.19/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
-github.com/modelcontextprotocol/go-sdk v0.5.0 h1:WXRHx/4l5LF5MZboeIJYn7PMFCrMNduGGVapYWFgrF8=
-github.com/modelcontextprotocol/go-sdk v0.5.0/go.mod h1:degUj7OVKR6JcYbDF+O99Fag2lTSTbamZacbGTRTSGU=
+github.com/modelcontextprotocol/go-sdk v0.6.0 h1:cmtMYfRAUtEtCiuorOWPj7ygcypfuB2FgFEDBqZqgy4=
+github.com/modelcontextprotocol/go-sdk v0.6.0/go.mod h1:djQKZ74bEV+UMAmyG/L0coVhV0HM3fpVtGuUPls0znc=
 github.com/openai/openai-go/v2 v2.4.3 h1:pzIW8mdc5y8/xaYmgl7ui7dI9AKRKfD5+LqGdQalqGI=
 github.com/openai/openai-go/v2 v2.4.3/go.mod h1:sIUkR+Cu/PMUVkSKhkk742PRURkQOCFhiwJ7eRSBqmk=
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=

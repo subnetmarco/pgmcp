@@ -6,7 +6,7 @@ toolchain go1.24.7
 
 require (
 	github.com/jackc/pgx/v5 v5.6.0
-	github.com/modelcontextprotocol/go-sdk v0.5.0
+	github.com/modelcontextprotocol/go-sdk v0.6.0
 	github.com/openai/openai-go/v2 v2.4.3
 	github.com/rs/zerolog v1.33.0
 )
