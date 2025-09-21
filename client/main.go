@@ -25,10 +25,10 @@ func (a *asksFlag) String() string     { return strings.Join(*a, "; ") }
 func (a *asksFlag) Set(v string) error { *a = append(*a, v); return nil }
 
 func main() {
-	url := getenv("PGMCP_SERVER_URL", "http://127.0.0.1:8080/mcp/sse")
+	url := getenv("PGMCP_SERVER_URL", "http://127.0.0.1:8080/mcp")
 	bearer := os.Getenv("PGMCP_AUTH_BEARER")
 
-	serverURL := flag.String("url", url, "MCP SSE server URL (e.g. http://host:8080/mcp/sse)")
+	serverURL := flag.String("url", url, "MCP server URL (e.g. http://host:8080/mcp)")
 	auth := flag.String("bearer", bearer, "Optional bearer token")
 	format := flag.String("format", "json", "Output format: table, json, csv")
 	verbose := flag.Bool("verbose", false, "Verbose output")
@@ -47,12 +47,12 @@ func main() {
 	httpClient := &http.Client{
 		Transport: &authRoundTripper{base: http.DefaultTransport, bearer: strings.TrimSpace(*auth)},
 	}
-	tr := &mcp.SSEClientTransport{
+	tr := &mcp.StreamableClientTransport{
 		Endpoint:   *serverURL,
 		HTTPClient: httpClient,
 	}
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "pgmcp-client", Version: "0.4.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "pgmcp-client", Version: "0.5.0"}, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -255,7 +255,9 @@ func printTable(rows []any) {
 	}
 
 	fmt.Printf("\n(%d rows)\n", len(records))
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		log.Printf("Error flushing table output: %v", err)
+	}
 }
 
 func printCSV(rows []any) {
@@ -295,7 +297,9 @@ func printCSV(rows []any) {
 	defer writer.Flush()
 
 	// Write header
-	writer.Write(columns)
+	if err := writer.Write(columns); err != nil {
+		log.Printf("Error writing CSV header: %v", err)
+	}
 
 	// Write rows
 	for _, record := range records {
@@ -304,14 +308,18 @@ func printCSV(rows []any) {
 			value := record[col]
 			row = append(row, formatValue(value))
 		}
-		writer.Write(row)
+		if err := writer.Write(row); err != nil {
+			log.Printf("Error writing CSV row: %v", err)
+		}
 	}
 }
 
 func printJSON(data any) {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
-	encoder.Encode(data)
+	if err := encoder.Encode(data); err != nil {
+		log.Printf("Error encoding JSON: %v", err)
+	}
 }
 
 func formatValue(value any) string {

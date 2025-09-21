@@ -44,6 +44,7 @@ export OPENAI_API_KEY="your-api-key"
 - `OPENAI_API_KEY`: OpenAI API key for SQL generation
 - `OPENAI_MODEL`: Model to use (default: "gpt-4o-mini")
 - `HTTP_ADDR`: Server address (default: ":8080")
+- `HTTP_PATH`: MCP endpoint path (default: "/mcp")
 - `AUTH_BEARER`: Bearer token for authentication
 
 ```
@@ -58,7 +59,7 @@ export OPENAI_API_KEY="your-api-key"
 │  JSON/CSV   │  Chat    │  AI Assistant    │  Editor   │     │
 └─────────────────────────────────────────────────────────────┘
          │
-         │ HTTP SSE / MCP Protocol
+         │ Streamable HTTP / MCP Protocol
          ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    PGMCP Server                             │
@@ -126,10 +127,14 @@ Key Benefits:
 
 ## Example Database
 
-The project includes an Amazon-like marketplace schema (`schema.sql`) with realistic data:
-- **Users** (5,000), **"Categories"** (23), **Items** (1,800), **Orders** (10,000)
-- **Mixed-case table names** for testing case sensitivity
-- **Full-text search indexes** and realistic relationships
+The project includes two schemas:
+- **`schema.sql`**: Full Amazon-like marketplace with 5,000+ records
+- **`schema_minimal.sql`**: Minimal test schema with mixed-case `"Categories"` table
+
+**Key features:**
+- **Mixed-case table names** (`"Categories"`) for testing case sensitivity
+- **Composite primary keys** (`order_items`) for testing AI assumptions
+- **Realistic relationships** and data types
 
 Use your own database:
 ```bash
@@ -168,8 +173,8 @@ Add to Cursor settings:
   "mcp.servers": {
     "pgmcp": {
       "transport": {
-        "type": "sse",
-        "url": "http://localhost:8080/mcp/sse"
+        "type": "http",
+        "url": "http://localhost:8080/mcp"
       }
     }
   }
@@ -183,8 +188,10 @@ Edit `~/.config/claude-desktop/claude_desktop_config.json`:
 {
   "mcpServers": {
     "pgmcp": {
-      "command": "curl",
-      "args": ["-N", "-H", "Accept: text/event-stream", "http://localhost:8080/mcp/sse"]
+      "transport": {
+        "type": "http",
+        "url": "http://localhost:8080/mcp"
+      }
     }
   }
 }

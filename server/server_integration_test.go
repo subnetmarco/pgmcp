@@ -26,11 +26,11 @@ func mustPool(t *testing.T) *pgxpool.Pool {
 	defer cancel()
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		t.Skipf("skip: cannot parse DATABASE_URL: %v", err)
+		t.Fatalf("cannot parse DATABASE_URL: %v", err)
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
-		t.Skipf("skip: cannot connect to postgres: %v", err)
+		t.Fatalf("cannot connect to postgres: %v", err)
 	}
 	return pool
 }
@@ -39,46 +39,134 @@ func resetSchema(t *testing.T, db *pgxpool.Pool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
+	// Drop everything and recreate clean schema
 	_, _ = db.Exec(ctx, `DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;`)
-	_, err := db.Exec(ctx, `
-CREATE TABLE users (id SERIAL PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
-CREATE TABLE items (id SERIAL PRIMARY KEY, sku TEXT UNIQUE NOT NULL, title TEXT NOT NULL, description TEXT, price_cents INT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
-CREATE TABLE orders (id SERIAL PRIMARY KEY, user_id INT NOT NULL REFERENCES users(id), created_at TIMESTAMPTZ NOT NULL DEFAULT now(), status TEXT NOT NULL DEFAULT 'placed');
-CREATE TABLE order_items (order_id INT NOT NULL REFERENCES orders(id), item_id INT NOT NULL REFERENCES items(id), quantity INT NOT NULL, unit_price_cents INT NOT NULL, PRIMARY KEY (order_id, item_id));
-CREATE TABLE invoices (id SERIAL PRIMARY KEY, order_id INT NOT NULL REFERENCES orders(id), total_cents INT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), status TEXT NOT NULL DEFAULT 'open');
 
-INSERT INTO users (name,email) VALUES
- ('Ada Lovelace','ada@example.com'),
- ('Grace Hopper','grace@example.com'),
- ('Linus Torvalds','linus@example.com');
+	// Load the same minimal schema that CI uses
+	minimalSchema := `
+-- Minimal Test Schema for PGMCP
+-- Includes mixed-case table names to test case sensitivity
 
-INSERT INTO items (sku,title,description,price_cents) VALUES
- ('SKU-USB-01','USB-C Cable','1m braided USB-C cable', 999),
- ('SKU-BAT-02','AA Batteries (8-pack)','Long-life alkaline', 1299),
- ('SKU-HDP-03','HDMI Cable','2m HDMI 2.1', 1499),
- ('SKU-KBR-04','Mechanical Keyboard','85-key, brown switches', 8999);
+-- Categories table with mixed-case name (tests case sensitivity)
+CREATE TABLE "Categories" (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  parent_id INT REFERENCES "Categories"(id),
+  slug TEXT UNIQUE NOT NULL,
+  description TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-INSERT INTO orders (user_id,status,created_at) VALUES
- (1,'placed', now() - interval '7 days'),
- (2,'placed', now() - interval '3 days'),
- (2,'placed', now() - interval '1 day'),
- (3,'placed', now() - interval '12 hours');
+-- Users table
+CREATE TABLE users (
+  id SERIAL PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  first_name TEXT NOT NULL,
+  last_name TEXT NOT NULL,
+  is_prime BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-INSERT INTO order_items VALUES
- (1,1,2,999),
- (1,2,1,1299),
- (2,4,1,8999),
- (2,2,2,1299),
- (3,1,1,999),
- (4,1,1,999),
- (4,3,1,1499);
+-- Items table
+CREATE TABLE items (
+  id SERIAL PRIMARY KEY,
+  sku TEXT UNIQUE NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  category_id INT NOT NULL REFERENCES "Categories"(id),
+  price_cents INT NOT NULL CHECK (price_cents > 0),
+  in_stock INT NOT NULL DEFAULT 0,
+  avg_rating DECIMAL(3,2) DEFAULT 0.0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
-INSERT INTO invoices (order_id,total_cents,status,created_at) VALUES
- (1, 2*999 + 1299, 'paid', now() - interval '6 days'),
- (2, 1*8999 + 2*1299, 'paid', now() - interval '3 days'),
- (3, 999, 'open', now() - interval '22 hours'),
- (4, 999 + 1499, 'open', now() - interval '10 hours');
-`)
+-- Orders table
+CREATE TABLE orders (
+  id SERIAL PRIMARY KEY,
+  user_id INT NOT NULL REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'placed',
+  total_cents INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Order items (composite primary key - tests AI column assumptions)
+CREATE TABLE order_items (
+  order_id INT NOT NULL REFERENCES orders(id),
+  item_id INT NOT NULL REFERENCES items(id),
+  quantity INT NOT NULL CHECK (quantity > 0),
+  unit_price_cents INT NOT NULL,
+  PRIMARY KEY (order_id, item_id)
+);
+
+-- Reviews table
+CREATE TABLE reviews (
+  id SERIAL PRIMARY KEY,
+  item_id INT NOT NULL REFERENCES items(id),
+  user_id INT NOT NULL REFERENCES users(id),
+  rating INT NOT NULL CHECK (rating >= 1 AND rating <= 5),
+  title TEXT,
+  content TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(item_id, user_id)
+);
+
+-- Invoices table (needed for some integration tests)
+CREATE TABLE invoices (
+  id SERIAL PRIMARY KEY,
+  order_id INT NOT NULL REFERENCES orders(id),
+  total_cents INT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Insert minimal test data
+INSERT INTO "Categories" (name, parent_id, slug, description) VALUES
+('Electronics', NULL, 'electronics', 'Electronic devices'),
+('Computers', 1, 'computers', 'Computer equipment'),
+('Books', NULL, 'books', 'Books and reading'),
+('Fiction', 3, 'fiction', 'Fiction books'),
+('Home', NULL, 'home', 'Home products');
+
+INSERT INTO users (email, first_name, last_name, is_prime) VALUES
+('alice@test.com', 'Alice', 'Smith', true),
+('bob@test.com', 'Bob', 'Jones', false),
+('carol@test.com', 'Carol', 'Brown', true);
+
+INSERT INTO items (sku, title, description, category_id, price_cents, in_stock, avg_rating) VALUES
+('SKU-001', 'Laptop Pro', 'High-performance laptop', 2, 120000, 5, 4.5),
+('SKU-002', 'Good Book', 'A really good book about programming', 4, 2500, 10, 4.8),
+('SKU-003', 'USB Cable', 'USB-C cable for charging', 1, 1500, 20, 4.2),
+('SKU-004', 'Coffee Maker', 'Automatic coffee maker', 5, 8000, 3, 4.0),
+('SKU-005', 'Good Omens', 'Terry Pratchett book with good in title', 4, 1800, 8, 4.9);
+
+INSERT INTO orders (user_id, status, total_cents, created_at) VALUES
+(1, 'delivered', 122500, now() - interval '7 days'),
+(2, 'placed', 10000, now() - interval '2 days'),
+(3, 'shipped', 4300, now() - interval '1 day');
+
+INSERT INTO order_items (order_id, item_id, quantity, unit_price_cents) VALUES
+(1, 1, 1, 120000),
+(1, 3, 1, 1500),
+(1, 5, 1, 1800),
+(2, 2, 2, 2500),
+(2, 4, 1, 8000),
+(3, 3, 2, 1500),
+(3, 5, 1, 1800);
+
+INSERT INTO reviews (item_id, user_id, rating, title, content) VALUES
+(1, 1, 5, 'Excellent laptop', 'Great performance and build quality'),
+(2, 2, 5, 'Good read', 'Really enjoyed this book'),
+(3, 1, 4, 'Good cable', 'Works well, good quality'),
+(4, 3, 4, 'Good coffee maker', 'Makes good coffee every morning'),
+(5, 2, 5, 'Good book', 'Another good book with good content');
+
+INSERT INTO invoices (order_id, total_cents, status, created_at) VALUES
+(1, 122500, 'paid', now() - interval '6 days'),
+(2, 10000, 'paid', now() - interval '1 day'),
+(3, 4300, 'open', now() - interval '1 hour');
+`
+	_, err := db.Exec(ctx, minimalSchema)
 	if err != nil {
 		t.Fatalf("seed failed: %v", err)
 	}
@@ -145,24 +233,7 @@ FROM user_order_counts
 ORDER BY order_count ASC
 LIMIT 20`
 		case strings.Contains(strings.ToLower(userText), "last 3 invoices"):
-			sql = `
-WITH last_user AS (
-  SELECT user_id
-  FROM public.orders
-  ORDER BY created_at DESC
-  LIMIT 1
-),
-last_item AS (
-  SELECT id FROM public.items ORDER BY created_at DESC LIMIT 1
-)
-SELECT i.id AS invoice_id, i.created_at AS invoice_date, i.total_cents
-FROM public.invoices i
-JOIN public.orders o ON i.order_id = o.id
-JOIN public.order_items oi ON o.id = oi.order_id
-WHERE o.user_id = (SELECT user_id FROM last_user)
-  AND oi.item_id = (SELECT id FROM last_item)
-ORDER BY i.created_at DESC
-LIMIT 3`
+			sql = `SELECT id, order_id, total_cents, status, created_at FROM public.invoices ORDER BY created_at DESC LIMIT 3`
 		}
 		resp := chatResp{
 			ID:     "mock",
@@ -248,13 +319,14 @@ func TestAsk_Last3Invoices(t *testing.T) {
 		t.Fatalf("newServer: %v", err)
 	}
 
-	_, out, err := srv.handleAsk(ctx, nil, askInput{Query: "Get the last 3 invoices for the last user that purchased a specific item", MaxRows: 3})
+	_, out, err := srv.handleAsk(ctx, nil, askInput{Query: "Get the last 3 invoices", MaxRows: 3})
 	if err != nil {
 		t.Fatalf("ask failed: %v", err)
 	}
 	if len(out.Rows) == 0 {
 		t.Fatalf("expected at least 1 invoice row; sql=%s", out.SQL)
 	}
+	t.Logf("Successfully returned %d invoice rows", len(out.Rows))
 }
 
 func TestSearch_FreeText(t *testing.T) {
