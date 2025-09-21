@@ -140,11 +140,11 @@ func BenchmarkSchemaCache(b *testing.B) {
 }
 
 func TestConcurrentSafety(t *testing.T) {
-	t.Parallel()
+	// Integration tests should not run in parallel due to shared database
 
 	db := mustPool(t)
 	defer db.Close()
-	setupComprehensiveTestData(t, db)
+	resetSchema(t, db)
 
 	llm := mockOpenAIFast(t)
 	defer llm.Close()
@@ -249,7 +249,7 @@ func TestConcurrentSafety(t *testing.T) {
 }
 
 func TestMemoryUsage(t *testing.T) {
-	t.Parallel()
+	// Integration tests should not run in parallel due to shared database
 
 	db := mustPool(t)
 	defer db.Close()
@@ -297,7 +297,7 @@ func TestMemoryUsage(t *testing.T) {
 }
 
 func TestErrorHandling(t *testing.T) {
-	t.Parallel()
+	// Integration tests should not run in parallel due to shared database
 
 	cfg := Config{
 		DatabaseURL: "postgres://invalid:invalid@nonexistent:5432/invalid",
@@ -308,10 +308,15 @@ func TestErrorHandling(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("invalid_database_connection", func(t *testing.T) {
+		// Use a short timeout context to make this test faster
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
 		_, err := newServer(ctx, cfg)
 		if err == nil {
 			t.Fatalf("expected error for invalid database connection")
 		}
+		t.Logf("Got expected error for invalid database: %v", err)
 	})
 
 	// Test with valid connection but invalid queries
@@ -324,7 +329,7 @@ func TestErrorHandling(t *testing.T) {
 
 		srv, err := newServer(ctx, validCfg)
 		if err != nil {
-			t.Skipf("skip: cannot create server: %v", err)
+			t.Fatalf("cannot create server: %v", err)
 		}
 
 		t.Run("invalid_sql_syntax", func(t *testing.T) {
@@ -355,7 +360,7 @@ func mockOpenAIFast(tb testing.TB) *httptest.Server {
 		}
 
 		// Return fast, simple SQL for tables that actually exist in the test database
-		sql := "SELECT id, name FROM test_users ORDER BY id LIMIT 10"
+		sql := "SELECT id, first_name, last_name, email FROM users ORDER BY id LIMIT 10"
 
 		resp := map[string]any{
 			"id":      "chatcmpl-test",

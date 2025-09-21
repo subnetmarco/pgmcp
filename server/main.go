@@ -289,6 +289,12 @@ func newServer(ctx context.Context, cfg Config) (*Server, error) {
 		return nil, err
 	}
 
+	// Test the connection to ensure it's valid
+	if err := db.Ping(ctx); err != nil {
+		db.Close()
+		return nil, err
+	}
+
 	var opts []option.RequestOption
 	if cfg.OpenAIKey != "" {
 		opts = append(opts, option.WithAPIKey(cfg.OpenAIKey))
@@ -580,6 +586,44 @@ func (s *Server) handleAsk(ctx context.Context, req *mcp.CallToolRequest, in ask
 				SQL:  sql,
 				Rows: errorRows,
 				Note: note + " (query failed - column not found)",
+			}, nil
+		}
+
+		// Handle table/relation errors gracefully
+		if strings.Contains(err.Error(), "relation") && strings.Contains(err.Error(), "does not exist") {
+			auditLog("ask_query_failed", clientIP, sql, err.Error(), false)
+			log.Debug().Str("tool", "ask").Err(err).Dur("dur", time.Since(start)).Msg("query failed - table not found")
+
+			errorRows := []map[string]any{
+				{
+					"error":        "Table not found in generated query",
+					"suggestion":   "Check available tables or rephrase your question",
+					"original_sql": sql,
+				},
+			}
+			return nil, askOutput{
+				SQL:  sql,
+				Rows: errorRows,
+				Note: note + " (query failed - table not found)",
+			}, nil
+		}
+
+		// Handle syntax errors gracefully
+		if strings.Contains(err.Error(), "syntax error") {
+			auditLog("ask_query_failed", clientIP, sql, err.Error(), false)
+			log.Debug().Str("tool", "ask").Err(err).Dur("dur", time.Since(start)).Msg("query failed - syntax error")
+
+			errorRows := []map[string]any{
+				{
+					"error":        "SQL syntax error in generated query",
+					"suggestion":   "Try rephrasing your question more clearly",
+					"original_sql": sql,
+				},
+			}
+			return nil, askOutput{
+				SQL:  sql,
+				Rows: errorRows,
+				Note: note + " (query failed - syntax error)",
 			}, nil
 		}
 
@@ -1099,7 +1143,7 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("init failed")
 	}
-	impl := &mcp.Implementation{Name: "pgmcp-go", Version: "0.2.0"}
+	impl := &mcp.Implementation{Name: "pgmcp-go", Version: "0.3.0"}
 
 	server := mcp.NewServer(impl, nil)
 
@@ -1116,12 +1160,12 @@ func main() {
 		Description: "Stream large result sets by automatically fetching all pages. Returns complete results progressively.",
 	}, srv.handleStream)
 
-	// --- HTTP + SSE transport ---
+	// --- Streamable HTTP transport ---
 	addr := envDefault("HTTP_ADDR", ":8080")
-	path := envDefault("HTTP_PATH", "/mcp/sse")
+	path := envDefault("HTTP_PATH", "/mcp")
 	bearer := strings.TrimSpace(os.Getenv("AUTH_BEARER"))
 
-	base := mcp.NewSSEHandler(func(r *http.Request) *mcp.Server { return server })
+	base := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server { return server }, nil)
 	var handler http.Handler = base
 	if bearer != "" {
 		handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1174,7 +1218,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	log.Info().Str("addr", addr).Str("path", path).Msg("starting MCP server on HTTP SSE")
+	log.Info().Str("addr", addr).Str("path", path).Msg("starting MCP server on streamable HTTP")
 	auditLog("server_start", "system", "", addr, true)
 
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {

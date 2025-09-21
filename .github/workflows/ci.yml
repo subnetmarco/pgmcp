@@ -26,6 +26,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.23"
+      - name: Install PostgreSQL Client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
       - name: Go tidy
         run: go mod tidy
       - name: Build Server
@@ -36,13 +40,38 @@ jobs:
         run: |
           go vet ./...
           test -z "$(gofmt -s -l . | grep -v vendor/)"
-      - name: Unit Tests
-        run: go test ./server -run "TestMinNonZero|TestGuardReadOnly|TestConfigValidate|TestSanitizeInput|TestPaginatedResult|TestStreamingPaginationCalculations|TestIsExpensiveQuery|TestSimplifyExpensiveQuery" -v
-      - name: Security Tests
-        run: go test ./server -run "TestSanitizeInputComprehensive|TestGuardReadOnlyComprehensive|TestConfigValidationEdgeCases" -v
-      - name: Client Tests
-        run: go test ./client -v
-      - name: Integration Tests
-        run: go test ./server -v
-      - name: Performance Tests (with database)
-        run: go test ./server -tags=integration -run "BenchmarkQueryPerformance|TestConcurrentSafety" -v
+      - name: Security Scan (GoSec)
+        uses: securego/gosec@master
+        with:
+          args: './...'
+      - name: Setup Database Schema
+        run: |
+          # Wait for PostgreSQL to be ready
+          until pg_isready -h 127.0.0.1 -p 5432 -U postgres; do sleep 1; done
+          # Load minimal schema for end-to-end testing (includes "Categories" table)
+          psql $DATABASE_URL < schema_minimal.sql
+      - name: All Tests (with database)
+        run: go test ./... -v
+      - name: Integration & Performance Tests
+        run: go test ./server -tags=integration -v
+      - name: End-to-End Test (Search Only)
+        run: |
+          # Start server in background (no OpenAI key needed for search)
+          ./pgmcp-server &
+          SERVER_PID=$!
+          
+          # Wait for server to start
+          sleep 5
+          
+          # Test search functionality (doesn't require OpenAI)
+          echo "Testing search functionality..."
+          ./pgmcp-client -search "Electronics" -format table
+          ./pgmcp-client -search "good" -format json
+          ./pgmcp-client -search "Books" -format table
+          
+          # Test server health endpoint
+          curl -f http://localhost:8080/healthz || exit 1
+          
+          # Clean up
+          kill $SERVER_PID
+          echo "✅ End-to-end search functionality test completed successfully"
