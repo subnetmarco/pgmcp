@@ -68,7 +68,7 @@ func TestStreamableHTTPTransport(t *testing.T) {
 			t.Fatalf("Expected Cache-Control: no-cache, no-transform, got: %s", resp.Header.Get("Cache-Control"))
 		}
 
-		t.Logf("✅ All required HTTP headers present for streamable transport")
+		t.Logf("All required HTTP headers present for streamable transport")
 		t.Logf("Content-Type: %s", resp.Header.Get("Content-Type"))
 		t.Logf("Cache-Control: %s", resp.Header.Get("Cache-Control"))
 		t.Logf("Connection: %s", resp.Header.Get("Connection"))
@@ -102,7 +102,7 @@ func TestStreamableHTTPTransport(t *testing.T) {
 			t.Fatalf("Expected event-stream format with 'data:' field, got: %s", bodyStr)
 		}
 
-		t.Logf("✅ Proper event-stream format")
+		t.Logf("Proper event-stream format")
 		t.Logf("Response body: %s", bodyStr)
 	})
 
@@ -142,7 +142,7 @@ func TestStreamableHTTPTransport(t *testing.T) {
 			t.Fatalf("Expected to find 'search' tool in tools list")
 		}
 
-		t.Logf("✅ MCP client successfully connected via streamable HTTP transport")
-		t.Logf("✅ Found %d tools including 'search'", len(tools.Tools))
+		t.Logf("MCP client successfully connected via streamable HTTP transport")
+		t.Logf("Found %d tools including 'search'", len(tools.Tools))
 	})
 }
