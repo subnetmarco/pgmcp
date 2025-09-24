@@ -67,18 +67,18 @@ func main() {
 	}
 
 	if *verbose {
-		fmt.Printf("✓ Connected to server at %s\n", *serverURL)
+		fmt.Printf("Connected to server at %s\n", *serverURL)
 	}
 
 	for _, q := range asks {
 		if *verbose {
-			fmt.Printf("🔍 Asking: %s\n", q)
+			fmt.Printf("Asking: %s\n", q)
 		}
 		runAsk(ctx, session, q, *format, *verbose, *maxRows)
 	}
 	if s := strings.TrimSpace(*search); s != "" {
 		if *verbose {
-			fmt.Printf("🔎 Searching for: %s\n", s)
+			fmt.Printf("Searching for: %s\n", s)
 		}
 		runSearch(ctx, session, s, *format, *verbose)
 	}
@@ -88,7 +88,7 @@ func runAsk(ctx context.Context, session *mcp.ClientSession, question, format st
 	args := map[string]any{"query": question, "max_rows": maxRows}
 
 	if verbose {
-		fmt.Printf("🌊 Streaming query (max %d rows)...\n", maxRows)
+		fmt.Printf("Streaming query (max %d rows)...\n", maxRows)
 	}
 
 	res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "ask", Arguments: args})
@@ -156,12 +156,12 @@ func printFormattedResult(result map[string]any, format string, verbose bool) {
 	note, _ := result["note"].(string)
 
 	if verbose && hasSQL {
-		fmt.Printf("📝 Generated SQL: %s\n\n", sql)
+		fmt.Printf("Generated SQL: %s\n\n", sql)
 	}
 
 	// Show streaming info if available in note
 	if verbose && note != "" && len(rows) > 50 {
-		fmt.Printf("🌊 Auto-streamed results: %s\n", note)
+		fmt.Printf("Auto-streamed results: %s\n", note)
 	}
 
 	if !hasRows || len(rows) == 0 {
@@ -174,7 +174,7 @@ func printFormattedResult(result map[string]any, format string, verbose bool) {
 	}
 
 	if verbose && len(rows) > 0 {
-		fmt.Printf("📊 Showing %d results\n\n", len(rows))
+		fmt.Printf("Showing %d results\n\n", len(rows))
 	}
 
 	switch format {

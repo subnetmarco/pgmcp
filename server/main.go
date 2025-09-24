@@ -112,7 +112,7 @@ func (c *SchemaCache) Get(ctx context.Context, db *pgxpool.Pool) (string, error)
 		return "", err
 	}
 	if len(txt) > schemaMaxChars {
-		txt = txt[:schemaMaxChars] + "\n-- …truncated schema…"
+		txt = txt[:schemaMaxChars] + "\n-- ...truncated schema..."
 	}
 	c.txt = txt
 	c.expiresAt = time.Now().Add(c.ttl)
@@ -753,7 +753,7 @@ func (s *Server) handleStream(ctx context.Context, req *mcp.CallToolRequest, in 
 
 // ---------- SQL helpers ----------
 
-var mutating = regexp.MustCompile(`(?is)\b(INSERT|UPDATE|DELETE|UPSERT|MERGE|ALTER|DROP|TRUNCATE|VACUUM|REINDEX|GRANT|REVOKE|CREATE)\b`)
+var mutating = regexp.MustCompile(`(?is)\b(INSERT|UPDATE|DELETE|UPSERT|MERGE|ALTER|DROP|TRUNCATE|VACUUM|REINDEX|GRANT|REVOKE|CREATE|COPY|ROLLBACK|COMMIT|BEGIN|START|SAVEPOINT|RELEASE|SET)\b`)
 
 func guardReadOnly(sql string) error {
 	if mutating.MatchString(sql) {
@@ -1027,18 +1027,18 @@ func (s *Server) generateSQL(ctx context.Context, question, schema string, maxRo
 	- CRITICAL: Use table and column names EXACTLY as shown in the schema below, including quotes when present.
 
 	Query Scope Rules:
-	- SINGULAR questions ("Who is the...", "What is the...") → LIMIT 1
-	- PLURAL questions ("Who are the...", "What are the...") → LIMIT 20
-	- COUNT questions ("How many...") → Return COUNT, no additional LIMIT
-	- LIST questions ("List all...", "Show all...") → LIMIT 50
-	- COMPARISON questions ("Compare X and Y...") → Return just the compared items
+	- SINGULAR questions ("Who is the...", "What is the...") -> LIMIT 1
+	- PLURAL questions ("Who are the...", "What are the...") -> LIMIT 20
+	- COUNT questions ("How many...") -> Return COUNT, no additional LIMIT
+	- LIST questions ("List all...", "Show all...") -> LIMIT 50
+	- COMPARISON questions ("Compare X and Y...") -> Return just the compared items
 	
 	User Override Rules (when user explicitly wants more results):
-	- "Show ALL [items]" or "List ALL [items]" → Use larger LIMIT (200-500)
-	- "Give me EVERY [item]" → Use larger LIMIT (200-500) 
-	- "Show me EVERYTHING" → Use larger LIMIT (200-500)
-	- "Complete list of [items]" → Use larger LIMIT (200-500)
-	- When user emphasizes ALL/EVERY/COMPLETE → Override normal limits
+	- "Show ALL [items]" or "List ALL [items]" -> Use larger LIMIT (200-500)
+	- "Give me EVERY [item]" -> Use larger LIMIT (200-500) 
+	- "Show me EVERYTHING" -> Use larger LIMIT (200-500)
+	- "Complete list of [items]" -> Use larger LIMIT (200-500)
+	- When user emphasizes ALL/EVERY/COMPLETE -> Override normal limits
 	- But still respect the maximum LIMIT constraint provided
 
 	CRITICAL COLUMN CHECKING RULES:
@@ -1046,7 +1046,7 @@ func (s *Server) generateSQL(ctx context.Context, question, schema string, maxRo
 	- ONLY use columns that are explicitly listed in the schema below
 	- If you need a column that doesn't exist in your target table, you MUST use JOINs
 	- Example: If you need user_id but you're querying order_items (which has no user_id), 
-	  you MUST JOIN: order_items → orders → users via the foreign keys shown in schema
+	  you MUST JOIN: order_items -> orders -> users via the foreign keys shown in schema
 	- NEVER assume standard columns like 'id' exist - many tables use composite keys
 	- For counting records: use COUNT(*) instead of COUNT(table.id) unless 'id' is explicitly shown
 	- NEVER write SQL with non-existent columns - this will cause errors
