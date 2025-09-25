@@ -117,7 +117,15 @@ release:
   footer: |
     ### Installation via Package Managers
     
-    Coming soon: Homebrew, Chocolatey, and other package managers.
+    ```bash
+    # Homebrew (macOS/Linux)
+    brew tap subnetmarco/homebrew-tap
+    brew install pgmcp
+    
+    # Linux packages
+    sudo apt install ./pgmcp_{{ .Version }}_linux_amd64.deb  # Debian/Ubuntu
+    sudo rpm -i pgmcp_{{ .Version }}_linux_amd64.rpm         # RedHat/CentOS
+    ```
     
     ### Docker
     
