@@ -22,6 +22,10 @@ go.work.sum
 pgmcp-server
 pgmcp-client
 
+# Build directory
+build/
+dist/
+
 # Environment files
 .env
 .env.local

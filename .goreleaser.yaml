@@ -1,0 +1,188 @@
+version: 2
+
+project_name: pgmcp
+
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+builds:
+  - id: pgmcp-server
+    main: ./server
+    binary: pgmcp-server
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+  - id: pgmcp-client
+    main: ./client
+    binary: pgmcp-client
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+archives:
+  - id: pgmcp
+    name_template: "pgmcp_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+      - schema.sql
+      - schema_minimal.sql
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Performance improvements
+      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Others
+      order: 999
+
+release:
+  draft: false
+  replace_existing_draft: true
+  target_commitish: "{{ .Commit }}"
+  discussion_category_name: General
+  prerelease: auto
+  mode: replace
+  header: |
+    ## PGMCP {{ .Tag }}
+    
+    PostgreSQL Model Context Protocol Server - Pre-compiled binaries for multiple platforms.
+    
+    ### Quick Start
+    
+    1. Download the appropriate binary for your platform below
+    2. Extract the archive
+    3. Set up your environment variables:
+       ```bash
+       export DATABASE_URL="postgres://user:password@localhost:5432/mydb"
+       export OPENAI_API_KEY="your-api-key"  # Optional
+       ```
+    4. Run the server: `./pgmcp-server`
+    5. Test with the client: `./pgmcp-client -ask "What tables do I have?" -format table`
+    
+    ### Platform Support
+    
+    - **Linux**: x86_64 and ARM64
+    - **macOS**: Intel and Apple Silicon (M1/M2/M3)
+    - **Windows**: x86_64 and ARM64
+    
+  footer: |
+    ### Installation via Package Managers
+    
+    Coming soon: Homebrew, Chocolatey, and other package managers.
+    
+    ### Docker
+    
+    ```bash
+    # Server
+    docker run -e DATABASE_URL=your_db_url -e OPENAI_API_KEY=your_key ghcr.io/subnetmarco/pgmcp:{{ .Tag }}
+    ```
+    
+    **Full Changelog**: https://github.com/subnetmarco/pgmcp/compare/{{ .PreviousTag }}...{{ .Tag }}
+
+brews:
+  - name: pgmcp
+    description: "PostgreSQL Model Context Protocol Server"
+    homepage: "https://github.com/subnetmarco/pgmcp"
+    license: "Apache-2.0"
+    repository:
+      owner: subnetmarco
+      name: homebrew-tap
+    commit_author:
+      name: pgmcp-bot
+      email: bot@subnetmarco.com
+    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
+    folder: Formula
+    install: |
+      bin.install "pgmcp-server"
+      bin.install "pgmcp-client"
+    test: |
+      system "#{bin}/pgmcp-server", "--version"
+      system "#{bin}/pgmcp-client", "--help"
+
+dockers:
+  - image_templates:
+      - "ghcr.io/subnetmarco/pgmcp:{{ .Tag }}"
+      - "ghcr.io/subnetmarco/pgmcp:latest"
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.description=PostgreSQL Model Context Protocol Server"
+      - "--label=org.opencontainers.image.url=https://github.com/subnetmarco/pgmcp"
+      - "--label=org.opencontainers.image.source=https://github.com/subnetmarco/pgmcp"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.licenses=Apache-2.0"
+
+nfpms:
+  - id: pgmcp
+    package_name: pgmcp
+    vendor: SubnetMarco
+    homepage: https://github.com/subnetmarco/pgmcp
+    maintainer: Marco Palladino <marco@subnetmarco.com>
+    description: PostgreSQL Model Context Protocol Server
+    license: Apache-2.0
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+    contents:
+      - src: ./README.md
+        dst: /usr/share/doc/pgmcp/README.md
+      - src: ./LICENSE
+        dst: /usr/share/doc/pgmcp/LICENSE

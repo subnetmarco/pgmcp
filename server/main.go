@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -21,6 +22,13 @@ import (
 	"github.com/openai/openai-go/v2/option"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+)
+
+// Build-time variables (set via ldflags)
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
 )
 
 const (
@@ -1124,6 +1132,17 @@ Return ONLY SQL, nothing else.`
 }
 
 func main() {
+	// Handle version flag
+	versionFlag := flag.Bool("version", false, "Print version information and exit")
+	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("pgmcp-server %s\n", version)
+		fmt.Printf("  commit: %s\n", commit)
+		fmt.Printf("  built:  %s\n", date)
+		os.Exit(0)
+	}
+
 	zerolog.TimeFieldFormat = time.RFC3339
 	switch strings.ToLower(envDefault("LOG_LEVEL", "info")) {
 	case "debug":

@@ -19,6 +19,13 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+// Build-time variables (set via ldflags)
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 type asksFlag []string
 
 func (a *asksFlag) String() string     { return strings.Join(*a, "; ") }
@@ -33,10 +40,18 @@ func main() {
 	format := flag.String("format", "json", "Output format: table, json, csv")
 	verbose := flag.Bool("verbose", false, "Verbose output")
 	maxRows := flag.Int("max-rows", 1000, "Maximum rows to return (server auto-streams)")
+	versionFlag := flag.Bool("version", false, "Print version information and exit")
 	var asks asksFlag
 	flag.Var(&asks, "ask", "Plain-English question to run (repeatable)")
 	search := flag.String("search", "", "Optional free-text search string")
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("pgmcp-client %s\n", version)
+		fmt.Printf("  commit: %s\n", commit)
+		fmt.Printf("  built:  %s\n", date)
+		os.Exit(0)
+	}
 
 	// Validate format
 	validFormats := map[string]bool{"table": true, "json": true, "csv": true}
