@@ -125,8 +125,9 @@ cd pgmcp_*
 ### Alternative Options
 
 ```bash
-# Homebrew (macOS/Linux)
-brew install subnetmarco/tap/pgmcp
+# Homebrew (macOS/Linux) - Available after first release
+brew tap subnetmarco/homebrew-tap
+brew install pgmcp
 
 # Build from source
 go build -o pgmcp-server ./server
