@@ -76,4 +76,4 @@ jobs:
           
           # Clean up
           kill $SERVER_PID
-          echo "✅ End-to-end search functionality test completed successfully"
+          echo "End-to-end search functionality test completed successfully"

@@ -10,42 +10,29 @@ PGMCP connects AI assistants to **any PostgreSQL database** through natural lang
 
 ## Quick Start
 
-### Prerequisites
-- Go 1.23+
-- PostgreSQL database
-- OpenAI API key (optional, can use other compatible APIs)
+PGMCP connects to **your existing PostgreSQL database** and makes it accessible to AI assistants through natural language queries.
 
-### Installation
+### Prerequisites
+- PostgreSQL database (existing database with your schema)
+- OpenAI API key (optional, for AI-powered SQL generation)
+
+### Basic Usage
 
 ```bash
-# Build
-go build -o pgmcp-server ./server
-go build -o pgmcp-client ./client
+# Set up environment variables
+export DATABASE_URL="postgres://user:password@localhost:5432/your-existing-db"
+export OPENAI_API_KEY="your-api-key"  # Optional
 
-# Set up database (optional - works with any existing PostgreSQL database)
-export DATABASE_URL="postgres://user:password@localhost:5432/mydb"
-psql $DATABASE_URL < schema.sql
-
-# Run server
-export OPENAI_API_KEY="your-api-key"
+# Run server (using pre-compiled binary)
 ./pgmcp-server
 
-# Test with client
-./pgmcp-client -ask "Who is the user that places the most orders?" -format table
-./pgmcp-client -ask "Show me the top 40 most reviewed items in the marketplace" -format table
+# Test with client in another terminal
+./pgmcp-client -ask "What tables do I have?" -format table
+./pgmcp-client -ask "Who is the customer that has placed the most orders?" -format table
+./pgmcp-client -search "john" -format table
 ```
 
-### Environment Variables
-
-**Required:**
-- `DATABASE_URL`: PostgreSQL connection string
-
-**Optional:**
-- `OPENAI_API_KEY`: OpenAI API key for SQL generation
-- `OPENAI_MODEL`: Model to use (default: "gpt-4o-mini")
-- `HTTP_ADDR`: Server address (default: ":8080")
-- `HTTP_PATH`: MCP endpoint path (default: "/mcp")
-- `AUTH_BEARER`: Bearer token for authentication
+Here is how it works:
 
 ```
 👤 User / AI Assistant
@@ -98,6 +85,95 @@ Key Benefits:
 ✅ Comprehensive testing suite
 ```
 
+## Features
+
+- **Natural Language to SQL**: Ask questions in plain English
+- **Automatic Streaming**: Handles large result sets automatically  
+- **Safe Read-Only Access**: Prevents any write operations
+- **Text Search**: Search across all text columns
+- **Multiple Output Formats**: Table, JSON, and CSV
+- **PostgreSQL Case Sensitivity**: Handles mixed-case table names correctly
+- **Universal Compatibility**: Works with any PostgreSQL database
+
+### Environment Variables
+
+**Required:**
+- `DATABASE_URL`: PostgreSQL connection string to your existing database
+
+**Optional:**
+- `OPENAI_API_KEY`: OpenAI API key for AI-powered SQL generation
+- `OPENAI_MODEL`: Model to use (default: "gpt-4o-mini")
+- `HTTP_ADDR`: Server address (default: ":8080")
+- `HTTP_PATH`: MCP endpoint path (default: "/mcp")
+- `AUTH_BEARER`: Bearer token for authentication
+
+## Installation
+
+### Download Pre-compiled Binaries
+
+1. Go to [GitHub Releases](https://github.com/subnetmarco/pgmcp/releases)
+2. Download the binary for your platform (Linux, macOS, Windows)
+3. Extract and run:
+
+```bash
+# Example for macOS/Linux
+tar xzf pgmcp_*.tar.gz
+cd pgmcp_*
+./pgmcp-server
+```
+
+### Alternative Options
+
+```bash
+# Homebrew (macOS/Linux)
+brew install subnetmarco/tap/pgmcp
+
+# Build from source
+go build -o pgmcp-server ./server
+go build -o pgmcp-client ./client
+```
+
+### Docker/Kubernetes
+
+```bash
+# Docker
+docker run -e DATABASE_URL="postgres://user:pass@host:5432/db" \
+  -p 8080:8080 ghcr.io/subnetmarco/pgmcp:latest
+
+# Kubernetes (see examples/ directory for full manifests)
+kubectl create secret generic pgmcp-secret \
+  --from-literal=database-url="postgres://user:pass@host:5432/db"
+kubectl apply -f examples/k8s/
+```
+
+#### Quick Start
+
+```bash
+# Set up database (optional - works with any existing PostgreSQL database)
+export DATABASE_URL="postgres://user:password@localhost:5432/mydb"
+psql $DATABASE_URL < schema.sql
+
+# Run server
+export OPENAI_API_KEY="your-api-key"
+./pgmcp-server
+
+# Test with client
+./pgmcp-client -ask "Who is the user that places the most orders?" -format table
+./pgmcp-client -ask "Show me the top 40 most reviewed items in the marketplace" -format table
+```
+
+### Environment Variables
+
+**Required:**
+- `DATABASE_URL`: PostgreSQL connection string
+
+**Optional:**
+- `OPENAI_API_KEY`: OpenAI API key for SQL generation
+- `OPENAI_MODEL`: Model to use (default: "gpt-4o-mini")
+- `HTTP_ADDR`: Server address (default: ":8080")
+- `HTTP_PATH`: MCP endpoint path (default: "/mcp")
+- `AUTH_BEARER`: Bearer token for authentication
+
 ## Usage Examples
 
 ```bash
@@ -114,16 +190,6 @@ Key Benefits:
 # Different output formats
 ./pgmcp-client -ask "Export all data" -format csv -max-rows 1000
 ```
-
-## Features
-
-- **Natural Language to SQL**: Ask questions in plain English
-- **Automatic Streaming**: Handles large result sets automatically  
-- **Safe Read-Only Access**: Prevents any write operations
-- **Text Search**: Search across all text columns
-- **Multiple Output Formats**: Table, JSON, and CSV
-- **PostgreSQL Case Sensitivity**: Handles mixed-case table names correctly
-- **Universal Compatibility**: Works with any PostgreSQL database
 
 ## Example Database
 
