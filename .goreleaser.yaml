@@ -128,7 +128,7 @@ release:
     
     **Full Changelog**: https://github.com/subnetmarco/pgmcp/compare/{{ .PreviousTag }}...{{ .Tag }}
 
-brews:
+homebrew:
   - name: pgmcp
     description: "PostgreSQL Model Context Protocol Server"
     homepage: "https://github.com/subnetmarco/pgmcp"
