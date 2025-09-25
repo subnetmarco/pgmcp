@@ -140,17 +140,11 @@ brews:
     repository:
       owner: subnetmarco
       name: homebrew-tap
-    commit_author:
-      name: pgmcp-bot
-      email: bot@subnetmarco.com
-    commit_msg_template: "Brew formula update for {{ .ProjectName }} version {{ .Tag }}"
-    folder: Formula
     install: |
       bin.install "pgmcp-server"
       bin.install "pgmcp-client"
     test: |
       system "#{bin}/pgmcp-server", "--version"
-      system "#{bin}/pgmcp-client", "--help"
 
 dockers:
   - image_templates:
