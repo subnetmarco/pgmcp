@@ -85,6 +85,10 @@ Key Benefits:
 ✅ Comprehensive testing suite
 ```
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/subnetmarco-pgmcp).
+
 ## Features
 
 - **Natural Language to SQL**: Ask questions in plain English
