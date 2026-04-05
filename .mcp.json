@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "pgmcp": {
+      "command": "pgmcp",
+      "args": []
+    }
+  }
+}

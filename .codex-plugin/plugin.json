@@ -1,0 +1,24 @@
+{
+  "name": "pgmcp",
+  "version": "0.1.0",
+  "description": "Query any Postgres database in natural language from Codex via MCP",
+  "author": {
+    "name": "subnetmarco",
+    "url": "https://github.com/subnetmarco/pgmcp"
+  },
+  "homepage": "https://github.com/subnetmarco/pgmcp",
+  "repository": "https://github.com/subnetmarco/pgmcp",
+  "keywords": [
+    "mcp",
+    "codex"
+  ],
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "PG MCP",
+    "shortDescription": "Query any Postgres database in natural language from Codex via MCP",
+    "longDescription": "An MCP server to query any Postgres database in natural language.",
+    "category": "Database",
+    "websiteURL": "https://github.com/subnetmarco/pgmcp"
+  }
+}
